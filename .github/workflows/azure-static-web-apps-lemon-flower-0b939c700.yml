@@ -17,7 +17,7 @@ jobs:
       - name: Verify site files
         run: |
           ls -la "QLD Mapping" || true
-          test -f "QLD Mapping/index.html" && echo "Found index.html" || (echo "index.html missing"; exit 1)
+          test -f "QLD Mapping/Index.html" && echo "Found Index.html" || (echo "Index.html missing"; exit 1)
 
       # ---- Choose ONE of the two blocks below ----
 
@@ -48,3 +48,4 @@ jobs:
       #     app_location: "QLD Mapping"
       #     output_location: ""
       #     skip_app_build: true
+

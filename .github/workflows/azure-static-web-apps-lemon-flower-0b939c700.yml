@@ -9,42 +9,38 @@ jobs:
   build_and_deploy_job:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       id-token: write
-
+      contents: read
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: false
-          lfs: false
 
-      # Sanity check: prove index.html is where we expect
       - name: Verify site files
         run: |
           ls -la "QLD Mapping" || true
-          test -f "QLD Mapping/Index.html" && echo "Found Index.html" || (echo "Index.html missing in 'QLD Mapping'"; exit 1)
+          test -f "QLD Mapping/index.html" && echo "Found index.html" || (echo "index.html missing"; exit 1)
 
-      # Use ONE auth method. EITHER deployment token (simplest)...
-      - name: Deploy (using deployment token)
+      # ---- Choose ONE of the two blocks below ----
+
+      # Deployment token (simplest)
+      - name: Deploy with deployment token
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_LEMON_FLOWER_0B939C700 }}
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
           action: upload
-          app_location: "QLD Mapping"  # the folder that contains index.html
-          output_location: ""           # empty for plain HTML (no build output)
-          skip_app_build: true          # don't run Oryx
+          app_location: "QLD Mapping"
+          output_location: ""
+          skip_app_build: true
 
-      # ...OR OIDC (remove the block above and uncomment the 3 steps below)
-
-      # - name: Get Id Token
+      # OIDC (remove the block above if you use this)
+      # - name: Get GitHub ID token
       #   id: idtoken
-      #   uses: actions/github-script@v6
+      #   uses: actions/github-script@v7
       #   with:
       #     script: |
       #       const core = require('@actions/core');
       #       return await core.getIDToken();
       #     result-encoding: string
-      # - name: Deploy (using OIDC)
+      # - name: Deploy with OIDC
       #   uses: Azure/static-web-apps-deploy@v1
       #   with:
       #     github_id_token: ${{ steps.idtoken.outputs.result }}
@@ -52,4 +48,3 @@ jobs:
       #     app_location: "QLD Mapping"
       #     output_location: ""
       #     skip_app_build: true
-

@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Cornerstone — Accounts</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="./images/Flavour icon.png">
+
+  <!-- Shared site styles (your file) -->
+  <link rel="stylesheet" href="./Styles.css"/>
+
+  <!-- ===== Accounts page styles (no animations) ===== -->
+  <style>
+    :root{
+      /* fallbacks if not defined in Styles.css */
+      --border:#e1e3e6; --panel-2:#fafbfc; --shadow:0 6px 18px rgba(16,21,28,.08); --muted:#60656d;
+      --fs-base: 18px; --fs-label: 15px; --fs-input: 16px; --fs-title: 32px;
+    }
+    body{ font-size: var(--fs-base); }
+
+    /* Page wrap */
+    .account-wrap{max-width:1024px;margin:40px auto;padding:0 20px}
+    .account-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+    .account-title{font-weight:900;margin:0;font-size:var(--fs-title)}
+    .account-sub{color:var(--muted)}
+
+    /* Card */
+    .auth-card{background:#fff;border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+    .auth-bar{display:flex;gap:10px;padding:14px;border-bottom:1px solid var(--border);background:var(--panel-2)}
+    .auth-tab{user-select:none;border:1px solid transparent;background:#fff;border-radius:12px;padding:12px 18px;font-weight:800;cursor:pointer;font-size:var(--fs-input)}
+
+    .auth-body{padding:20px}
+
+    /* Forms */
+    .auth-form{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .auth-form.single{grid-template-columns:1fr}
+    .form-row{display:flex;flex-direction:column;gap:8px}
+    .form-row label{font-weight:700;font-size:var(--fs-label)}
+    .form-row input, .form-row select{border:1px solid var(--border);border-radius:12px;padding:14px 16px;font-size:var(--fs-input);outline:none}
+    .row-2{grid-column:span 2}
+
+    .divider{height:1px;background:var(--border);margin:16px 0}
+    .cta-row{display:flex;gap:12px;align-items:center}
+    .btn{appearance:none;border:1px solid var(--border);background:#fff;color:#333;font-weight:800;border-radius:12px;padding:14px 18px;font-size:var(--fs-input)}
+    .btn.primary{border-color:#a70b13;color:#a70b13}
+
+    /* CSS-only tabs default; JS will override/hide when signed-in */
+    .panel{display:none}
+    #t-signin:checked ~ .auth-bar label[for="t-signin"],
+    #t-create:checked ~ .auth-bar label[for="t-create"],
+    #t-account:checked ~ .auth-bar label[for="t-account"]{border-color:#f1c6d2;background:#fff0f2}
+    #t-signin:checked ~ .auth-body .panel-signin{display:block}
+    #t-create:checked ~ .auth-body .panel-create{display:block}
+    #t-account:checked ~ .auth-body .panel-account{display:block}
+
+    /* Account view */
+    .account-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .kv{display:flex;flex-direction:column;border:1px dashed var(--border);border-radius:12px;padding:14px;background:#fff}
+    .kv .k{font-size:14px;color:#666;text-transform:uppercase;letter-spacing:.06em}
+    .kv .v{font-weight:800;margin-top:6px;font-size:var(--fs-input)}
+
+    /* Helpers */
+    .hidden{display:none !important}
+
+    /* Mobile */
+    @media (max-width: 760px){
+      .auth-form{grid-template-columns:1fr}
+      .row-2{grid-column:auto}
+      .account-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+
+<body class="only-landing-body">
+  <!-- Background visuals from your template (kept) -->
+  <div class="grain"></div>
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+  <div class="bg-orb orb-4"></div>
+
+  <!-- Header -->
+  <div class="landing-header">
+    <div class="brand">
+      <a href="https://www.cornerstonebc.com.au/#building-certification-queensland" style="display:inline-grid;place-items:center">
+        <span class="brand-logo"><img src="./images/250916 Cornerstone Logo.png" alt="Cornerstone" style="height:64px"></span>
+      </a>
+    </div>
+    <div class="top-actions"><a href="Index.html" class="link-ghost">Home</a></div>
+  </div>
+
+  <main class="only-landing">
+    <section class="account-wrap">
+      <div class="account-head">
+        <div>
+          <h1 class="account-title">User Accounts</h1>
+          <div class="account-sub" id="accountSubtitle">Please sign in to continue.</div>
+        </div>
+      </div>
+
+      <div class="auth-card" id="authCard" data-endpoints='{"login":"/api/auth/login","register":"/api/auth/register","logout":"/api/auth/logout","me":"/api/me"}'>
+        <!-- Tab controls (hidden after sign-in) -->
+        <input type="radio" name="authtab" id="t-signin" hidden checked>
+        <input type="radio" name="authtab" id="t-create" hidden>
+        <input type="radio" name="authtab" id="t-account" hidden>
+
+        <div class="auth-bar" id="authTabs" role="tablist" aria-label="Account tabs">
+          <label class="auth-tab" role="tab" for="t-signin" id="tabSignIn">Sign In</label>
+          <label class="auth-tab" role="tab" for="t-create" id="tabCreate">Create Account</label>
+          <label class="auth-tab hidden" role="tab" for="t-account" id="tabAccount">Account</label>
+        </div>
+
+        <div class="auth-body">
+          <!-- Sign In -->
+          <section class="panel panel-signin" aria-labelledby="t-signin" id="panelSignIn">
+            <form class="auth-form single" id="formSignIn" autocomplete="on">
+              <div class="form-row">
+                <label for="siEmail">Email</label>
+                <input type="email" id="siEmail" placeholder="name@company.com" required>
+              </div>
+              <div class="form-row">
+                <label for="siPassword">Password</label>
+                <input type="password" id="siPassword" placeholder="Your password" minlength="8" required>
+              </div>
+              <div class="cta-row" style="margin-top:8px">
+                <button type="submit" class="btn primary" id="btnSignIn">Sign In</button>
+                <label for="t-create" class="btn">Create Account</label>
+              </div>
+            </form>
+          </section>
+
+          <!-- Create Account -->
+          <section class="panel panel-create" aria-labelledby="t-create" id="panelCreate">
+            <form class="auth-form" id="formCreate" autocomplete="on">
+              <div class="form-row"><label for="caFirst">First name</label><input id="caFirst" type="text" placeholder="Jane" required></div>
+              <div class="form-row"><label for="caLast">Last name</label><input id="caLast" type="text" placeholder="Doe" required></div>
+              <div class="form-row row-2"><label for="caEmail">Work email</label><input id="caEmail" type="email" placeholder="name@company.com" required></div>
+              <div class="form-row"><label for="caCompany">Company</label><input id="caCompany" type="text" placeholder="Cornerstone Building Certification"></div>
+              <div class="form-row"><label for="caRole">Role</label>
+                <select id="caRole"><option value="">Select a role</option><option>Building Certifier</option><option>Planner</option><option>Engineer</option><option>Admin</option></select>
+              </div>
+              <div class="form-row row-2"><label for="caPassword">Password</label><input id="caPassword" type="password" placeholder="At least 8 characters" minlength="8" required></div>
+              <div class="form-row row-2"><label for="caPassword2">Confirm password</label><input id="caPassword2" type="password" placeholder="Re-enter password" minlength="8" required></div>
+              <div class="cta-row">
+                <button type="submit" class="btn primary" id="btnCreate">Create Account</button>
+                <label for="t-signin" class="btn">Back to Sign In</label>
+              </div>
+            </form>
+          </section>
+
+          <!-- Account (shows after sign-in; tabs hidden) -->
+          <section class="panel panel-account" aria-labelledby="t-account" id="panelAccount">
+            <h3 style="margin:0 0 12px;font-size:22px">My Account</h3>
+            <div class="account-grid" style="margin-bottom:12px">
+              <div class="kv"><div class="k">Name</div><div class="v" id="accName">—</div></div>
+              <div class="kv"><div class="k">Email</div><div class="v" id="accEmail">—</div></div>
+              <div class="kv"><div class="k">Company</div><div class="v" id="accCompany">—</div></div>
+              <div class="kv"><div class="k">Role</div><div class="v" id="accRole">—</div></div>
+              <div class="kv"><div class="k">Joined</div><div class="v" id="accJoined">—</div></div>
+            </div>
+            <div class="cta-row">
+              <button class="btn" id="btnLogout" type="button">Log out</button>
+              <a class="btn" href="Index.html">Continue to Maps</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // ===== Simple auth UI logic =====
+    var card = document.getElementById('authCard');
+    var endpoints = JSON.parse(card.getAttribute('data-endpoints'));
+
+    var tabAccount = document.getElementById('tabAccount');
+    var tabsBar = document.getElementById('authTabs');
+    var subtitle = document.getElementById('accountSubtitle');
+
+    var panelSignIn = document.getElementById('panelSignIn');
+    var panelCreate = document.getElementById('panelCreate');
+    var panelAccount = document.getElementById('panelAccount');
+
+    function setView(which){
+      // Use radios for CSS default state
+      if(which==='signin') document.getElementById('t-signin').checked = true;
+      if(which==='create') document.getElementById('t-create').checked = true;
+      if(which==='account') document.getElementById('t-account').checked = true;
+    }
+
+    function postJson(url, data){
+      return fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, credentials:'include', body: JSON.stringify(data) })
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json().catch(function(){ return {}; }); });
+    }
+    function getJson(url){
+      return fetch(url, { credentials:'include' }).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+    }
+
+    function renderAccount(user){
+      document.getElementById('accName').textContent = (user.first_name||'') + ' ' + (user.last_name||'');
+      document.getElementById('accEmail').textContent = user.email||'—';
+      document.getElementById('accCompany').textContent = user.company||'—';
+      document.getElementById('accRole').textContent = user.role||'—';
+      var joined = user.created_at ? new Date(user.created_at) : null;
+      document.getElementById('accJoined').textContent = joined ? joined.toLocaleDateString() : '—';
+    }
+
+    function setSignedIn(user){
+      // Hide tabs entirely and show account only
+      tabsBar.classList.add('hidden');
+      tabAccount.classList.add('hidden');
+      subtitle.textContent = 'You are signed in.';
+      setView('account');
+      renderAccount(user);
+    }
+
+    function setSignedOut(){
+      // Show Sign In/Create tabs, hide Account tab
+      tabsBar.classList.remove('hidden');
+      tabAccount.classList.add('hidden');
+      subtitle.textContent = 'Please sign in to continue.';
+      setView('signin');
+    }
+
+    function fetchMe(){
+      return getJson(endpoints.me).then(function(payload){
+        if(payload && payload.user){ setSignedIn(payload.user); }
+        else { setSignedOut(); }
+      }).catch(function(){ setSignedOut(); });
+    }
+
+    // On load, determine state
+    fetchMe();
+
+    // ===== Handlers =====
+    document.getElementById('formSignIn').addEventListener('submit', function(e){
+      e.preventDefault();
+      var email = document.getElementById('siEmail').value.trim();
+      var password = document.getElementById('siPassword').value;
+      postJson(endpoints.login, { email: email, password: password, remember: true })
+        .then(fetchMe)
+        .catch(function(err){ alert('Sign in failed: '+err.message); });
+    });
+
+    document.getElementById('formCreate').addEventListener('submit', function(e){
+      e.preventDefault();
+      var p1 = document.getElementById('caPassword').value;
+      var p2 = document.getElementById('caPassword2').value;
+      if(p1 !== p2){ alert('Passwords do not match.'); return; }
+      var email = document.getElementById('caEmail').value.trim();
+      var payload = {
+        first_name: document.getElementById('caFirst').value.trim(),
+        last_name: document.getElementById('caLast').value.trim(),
+        email: email,
+        company: document.getElementById('caCompany').value.trim(),
+        role: document.getElementById('caRole').value,
+        password: p1
+      };
+      postJson(endpoints.register, payload)
+        .then(function(){ return postJson(endpoints.login, { email: email, password: p1 }); })
+        .then(fetchMe)
+        .catch(function(err){ alert('Create account failed: '+err.message); });
+    });
+
+    document.getElementById('btnLogout').addEventListener('click', function(){
+      postJson(endpoints.logout, {})
+        .then(function(){ setSignedOut(); })
+        .catch(function(){ setSignedOut(); });
+    });
+  </script>
+</body>
+</html>

@@ -19,7 +19,7 @@ jobs:
       - name: Verify site files
         run: |
           ls -la "QLD Mapping" || true
-          test -f "QLD Mapping/index.html" && echo "Found index.html" || (echo "index.html missing in 'QLD Mapping'"; exit 1)
+          test -f "QLD Mapping/Index.html" && echo "Found Index.html" || (echo "Index.html missing in 'QLD Mapping'"; exit 1)
 
       - name: Get GitHub ID token
         id: idtoken
@@ -38,3 +38,4 @@ jobs:
           app_location: "QLD Mapping"  # the folder that contains your static files
           output_location: ""           # plain HTML => no build output
           skip_app_build: true          # don't run Oryx build
+

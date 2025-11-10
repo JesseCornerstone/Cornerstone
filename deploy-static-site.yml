@@ -1,0 +1,25 @@
+name: Deploy static site to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      APP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Upload static content to Azure App Service
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.APP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: .

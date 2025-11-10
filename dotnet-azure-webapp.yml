@@ -10,7 +10,7 @@ on:
 # Global settings you can tweak
 env:
   DOTNET_VERSION: '8.0.x'                      # set to 6.0.x or 7.0.x if your app targets that
-  AZURE_WEBAPP_NAME: 'REPLACE_WITH_APP_NAME'   # <-- change to your Azure Web App name
+  AZURE_WEBAPP_NAME: 'CornerstonePlus'   # <-- change to your Azure Web App name
   # Optional: If you know the exact project to publish, uncomment the next line and set the path
   # APP_PROJECT_PATH: 'src/MyApp/MyApp.csproj'
 

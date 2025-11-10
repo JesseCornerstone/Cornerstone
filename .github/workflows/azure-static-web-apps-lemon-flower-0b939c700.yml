@@ -11,41 +11,30 @@ jobs:
     permissions:
       id-token: write
       contents: read
+
     steps:
       - uses: actions/checkout@v4
 
+      # Sanity check: prove the file is there and named correctly
       - name: Verify site files
         run: |
           ls -la "QLD Mapping" || true
-          test -f "QLD Mapping/Index.html" && echo "Found Index.html" || (echo "Index.html missing"; exit 1)
+          test -f "QLD Mapping/index.html" && echo "Found index.html" || (echo "index.html missing in 'QLD Mapping'"; exit 1)
 
-      # ---- Choose ONE of the two blocks below ----
+      - name: Get GitHub ID token
+        id: idtoken
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const core = require('@actions/core');
+            return await core.getIDToken();
+          result-encoding: string
 
-      # Deployment token (simplest)
-      - name: Deploy with deployment token
+      - name: Deploy to Azure Static Web Apps (OIDC)
         uses: Azure/static-web-apps-deploy@v1
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          github_id_token: ${{ steps.idtoken.outputs.result }}
           action: upload
-          app_location: "QLD Mapping"
-          output_location: ""
-          skip_app_build: true
-
-      # OIDC (remove the block above if you use this)
-      # - name: Get GitHub ID token
-      #   id: idtoken
-      #   uses: actions/github-script@v7
-      #   with:
-      #     script: |
-      #       const core = require('@actions/core');
-      #       return await core.getIDToken();
-      #     result-encoding: string
-      # - name: Deploy with OIDC
-      #   uses: Azure/static-web-apps-deploy@v1
-      #   with:
-      #     github_id_token: ${{ steps.idtoken.outputs.result }}
-      #     action: upload
-      #     app_location: "QLD Mapping"
-      #     output_location: ""
-      #     skip_app_build: true
-
+          app_location: "QLD Mapping"  # the folder that contains your static files
+          output_location: ""           # plain HTML => no build output
+          skip_app_build: true          # don't run Oryx build

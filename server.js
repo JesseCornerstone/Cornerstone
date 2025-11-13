@@ -12,7 +12,7 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- DB config (matches your Azure SQL) ----------
+// ---------- DB config ----------
 const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -31,7 +31,7 @@ poolPromise
   .then(() => console.log('✅ Connected to SQL database'))
   .catch(err => {
     console.error('❌ Failed to connect to SQL database', err);
-    // don't throw here – app should still run so we can see errors in responses
+    // don’t throw – we want the app to stay up so we can see JSON errors
   });
 
 // ---------- Middleware ----------
@@ -45,11 +45,11 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: false // set true if HTTPS + custom domain only
+    secure: false // true if HTTPS + custom domain only
   }
 }));
 
-// Map DB row (Id, FirstName, ...) to JSON user object used by Account.html
+// Map DB row to JSON
 function userFromRow(row) {
   if (!row) return null;
   return {
@@ -94,7 +94,11 @@ app.get('/api/me', async (req, res) => {
     return res.json({ user });
   } catch (err) {
     console.error('GET /api/me error', err);
-    return res.status(500).json({ user: null, error: 'Server error' });
+    return res.status(500).json({
+      user: null,
+      error: 'Server error',
+      detail: err.message       // DEBUG
+    });
   }
 });
 
@@ -162,7 +166,11 @@ app.post('/api/auth/register', async (req, res) => {
     return res.json({ ok: true, user });
   } catch (err) {
     console.error('POST /api/auth/register error', err);
-    return res.status(500).json({ ok: false, error: 'Server error' });
+    return res.status(500).json({
+      ok: false,
+      error: 'Server error',
+      detail: err.message      // DEBUG – this is the bit we want to see
+    });
   }
 });
 
@@ -211,7 +219,11 @@ app.post('/api/auth/login', async (req, res) => {
     return res.json({ ok: true, user });
   } catch (err) {
     console.error('POST /api/auth/login error', err);
-    return res.status(500).json({ ok: false, error: 'Server error' });
+    return res.status(500).json({
+      ok: false,
+      error: 'Server error',
+      detail: err.message      // DEBUG
+    });
   }
 });
 
@@ -220,7 +232,7 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(err => {
     if (err) {
       console.error('Logout error', err);
-      return res.status(500).json({ ok: false, error: 'Server error' });
+      return res.status(500).json({ ok: false, error: 'Server error', detail: err.message });
     }
     res.clearCookie('cs_sess');
     return res.json({ ok: true });

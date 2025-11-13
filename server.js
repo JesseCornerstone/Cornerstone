@@ -177,10 +177,11 @@ app.post('/api/auth/logout', (req, res) => {
   });
 });
 
-// Serve static front-end if you put files in ./public
+// Serve static frontend
 app.use(express.static('public'));
 
+// Azure gives us PORT via env
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Cornerstone auth API listening on http://localhost:${PORT}`);
+  console.log(`Server listening on port ${PORT}`);
 });

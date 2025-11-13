@@ -177,6 +177,10 @@ app.post('/api/auth/logout', (req, res) => {
   });
 });
 
+app.get('/health', (req, res) => {
+  res.json({ ok: true });
+});
+
 // Serve static frontend
 app.use(express.static('public'));
 
@@ -185,3 +189,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
 });
+

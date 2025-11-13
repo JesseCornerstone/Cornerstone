@@ -1,11 +1,771 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Cornerstone Test</title>
-  </head>
-  <body>
-    <h1>It works 🎉</h1>
-    <p>If you can see this on Azure, Node is running.</p>
-  </body>
+<html lang="en">
+<head>
+  <link rel="icon" type="image/png" sizes="32x32" href="./images/Flavour icon.png">
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Cornerstone Interactive Mapping</title>
+
+  <!-- Your shared CSS --><!-- ===== Polished Splash Styles ===== -->
+  <style>
+    :root{
+      --cs-ink:#0b0d12;
+      --cs-panel:#0f1218;
+      --cs-brand:#a70b13;
+      --cs-brand-2:#7f0e15;
+      --cs-text:#ffffff;
+      --cs-muted:rgba(255,255,255,.65);
+    }
+
+    /* Fullscreen overlay */
+    #logo-splash{
+      position:fixed; inset:0; z-index:9999;
+      display:grid; place-items:center;
+      background:
+        radial-gradient(1200px 800px at 60% 40%, rgba(255,255,255,.06), rgba(255,255,255,0) 60%),
+        linear-gradient(145deg, var(--cs-panel) 0%, #0b0d12 60%);
+      color:var(--cs-text);
+      pointer-events:none; /* except skip button */
+      opacity:1;
+      transform:translateY(0);
+      animation: splash-out 520ms ease 2.35s forwards;
+    }
+
+    /* Gentle vignette */
+    #logo-splash::after{
+      content:"";
+      position:absolute; inset:0;
+      box-shadow: inset 0 0 120px rgba(0,0,0,.55), inset 0 0 260px rgba(0,0,0,.35);
+      pointer-events:none;
+      opacity:.85;
+      animation: vignette-in 800ms ease forwards;
+    }
+
+    .splash-inner{
+      display:grid; place-items:center; gap:18px;
+      text-align:center;
+      transform: translateY(6px);
+      filter: blur(6px);
+      opacity:0;
+      animation: intro-in 900ms cubic-bezier(.22,.9,.22,1.1) 120ms forwards;
+    }
+
+    .splash-logo{
+      width:140px; height:auto; display:block;
+      filter: drop-shadow(0 10px 28px rgba(0,0,0,.35));
+      transform: translateZ(0) scale(.98);
+      animation: logo-settle 1200ms ease 600ms both;
+    }
+
+    .splash-wordmark{
+      font-size:14px; letter-spacing:.22em; text-transform:uppercase;
+      color:var(--cs-muted);
+      white-space:nowrap;
+      opacity:0; transform: translateY(2px);
+      animation: wordmark-in 700ms ease 520ms forwards;
+    }
+
+    /* Progress line */
+    .progress{
+      position:relative; width:min(240px, 60vw); height:2px;
+      background: rgba(255,255,255,.14);
+      border-radius:2px; overflow:hidden;
+      margin-top:4px;
+    }
+    .progress .bar{
+      position:absolute; left:0; top:0; bottom:0; width:0%;
+      background: linear-gradient(90deg, rgba(255,255,255,.0) 0%, rgba(255,255,255,.8) 40%, rgba(255,255,255,1) 60%, rgba(255,255,255,.0) 100%);
+      animation: progress-fill 1500ms cubic-bezier(.22,.9,.22,1) 500ms forwards;
+    }
+
+    /* Skip button (clickable even though overlay is not) */
+    .splash-skip{
+      position:fixed; right:18px; bottom:18px;
+      pointer-events:auto;
+      background: rgba(255,255,255,.06);
+      color: var(--cs-text);
+      border:1px solid rgba(255,255,255,.14);
+      border-radius:999px; padding:8px 12px;
+      font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+      backdrop-filter: blur(6px);
+      transition: transform .18s ease, background .18s ease, border-color .18s ease, opacity .18s ease;
+      opacity:.9;
+    }
+    .splash-skip:hover{ transform: translateY(-1px); background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
+    .splash-skip:active{ transform: translateY(0); }
+
+    /* Keyframes */
+    @keyframes intro-in{
+      from{ opacity:0; transform: translateY(6px); filter: blur(6px); }
+      60%{ filter: blur(0.6px); }
+      to{ opacity:1; transform: translateY(0); filter: blur(0); }
+    }
+    @keyframes logo-settle{
+      0%{ transform: scale(.98); }
+      55%{ transform: scale(1.04); }
+      100%{ transform: scale(1); }
+    }
+    @keyframes wordmark-in{
+      from{ opacity:0; letter-spacing:.36em; transform: translateY(6px); }
+      to{ opacity:.9; letter-spacing:.22em; transform: translateY(0); }
+    }
+    @keyframes progress-fill{
+      0%{ width:0%; }
+      80%{ width:84%; }
+      100%{ width:100%; }
+    }
+    @keyframes vignette-in{
+      from{ opacity:0; }
+      to{ opacity:.85; }
+    }
+    @keyframes splash-out{
+      from{ opacity:1; transform: translateY(0); }
+      to{ opacity:0; transform: translateY(-8px); }
+    }
+
+    /* Reduced motion: keep it snappy and minimal */
+    @media (prefers-reduced-motion: reduce){
+      #logo-splash, .splash-inner, .splash-logo, .splash-wordmark, .progress .bar{
+        animation: none !important;
+      }
+      #logo-splash{ opacity:1; }
+    }
+  </style>
+  <!-- Inlined from styles.css -->
+  <style>
+/* ===================== Core tokens ===================== */
+:root{
+  --brand:#a70b13; --brand-mid:#ffffff; --brand-dark:#961414;
+  --bg:#f4f5f7; --border:#e1e3e6; --radius:10px; --shadow:0 3px 10px rgba(0,0,0,.08);
+  --ink:#1f2328; --muted:#000000; --panel:#ffffff; --panel-2:#fafafb;
+  --grad-1:#ffd7e3; --grad-2:#ffb6c9; --grad-3:#ff8fb0;
+}
+
+/* Reset-ish */
+html,body{
+  height:100%;width:100%;margin:0;padding:0;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial;
+  background:var(--bg);color:var(--ink);
+}
+
+/* ===================== LANDING PAGE ===================== */
+.only-landing-body{overflow-x:hidden;background:linear-gradient(180deg,#fff 0%, #fff7f9 60%, #fff 100%);}
+
+/* Soft grain overlay */
+.grain{pointer-events:none;position:fixed;inset:0;opacity:.07;mix-blend-mode:multiply;background-image:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoEBGd6UuN8AAAAASUVORK5CYII=');background-size:256px 256px;z-index:0}
+
+/* Floating gradient blobs */
+.bg-orb{position:fixed;filter:blur(60px);z-index:0;opacity:.5;pointer-events:none;}
+.orb-1{width:420px;height:420px;border-radius:999px;background:radial-gradient(closest-side, #ff7a8f, transparent 70%);top:-80px;left:-80px;}
+.orb-2{width:520px;height:520px;border-radius:999px;background:radial-gradient(closest-side, #b10a1c, transparent 70%);bottom:-120px;right:-120px;}
+
+.landing-header{position:sticky;top:0;z-index:3;display:flex;justify-content:space-between;align-items:center;padding:22px 22px;background:rgba(255,255,255,.85);backdrop-filter:saturate(150%) blur(6px);border-bottom:1px solid rgba(0,0,0,.06)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800}
+.brand-logo{display:inline-grid;place-items:center;width:auto;height:auto}
+.brand-badge{display:inline-block;height:22px;min-width:22px;padding:0 8px;border-radius:999px;background:rgba(167,11,19,.1);border:1px solid rgba(167,11,19,.25);font-size:12px;line-height:22px;font-weight:700;color:#7b0a13}
+.top-actions{display:flex;gap:12px}
+.link-ghost{color:#7a0a14;text-decoration:none;padding:8px 10px;border-radius:8px;border:1px solid transparent}
+.link-ghost:hover{background:#fff;border-color:#efd2d7}
+
+.only-landing{position:relative;z-index:1;display:block;margin-inline:auto;max-width:1100px;padding:28px 18px}
+.hero{display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:30px;margin-bottom:18px}
+.hero-title{color:#961414; font-size:clamp(28px,5vw,44px);font-weight:900;letter-spacing:.2px;margin:0 0 8px}
+.hero-sub{max-width:800px;color:var(--muted);margin:0 auto 18px}
+.hero-cta{margin:10px 0 24px}
+.cssbuttons-io{position:relative;display:inline-flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;letter-spacing:.02em;border:none;border-radius:.9em;cursor:pointer;text-decoration:none;background:linear-gradient(90deg,#a70b13,#530505);color:#fff;overflow:hidden;transition:transform .2s, box-shadow .3s;}
+.cssbuttons-io span{position:relative;z-index:1;padding:12px 18px}
+.cssbuttons-io::before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,255,255,.18),rgba(255,255,255,0));transform:translateX(-100%);transition:transform .45s cubic-bezier(.3,1,.8,1)}
+.cssbuttons-io:hover::before{transform:translateX(0)}
+.cssbuttons-io:hover{box-shadow:0 6px 18px rgba(0,0,0,.22)}
+.cssbuttons-io:active{transform:scale(.97)}
+.hero-button{padding:0}
+
+.hero-stats{display:grid;grid-template-columns:repeat(3, minmax(140px,1fr));gap:10px;margin-top:6px;width:min(700px,95%);}
+.stat{background:rgba(255,255,255,.8);backdrop-filter:blur(4px);border:1px solid rgba(0,0,0,.06);border-radius:12px;padding:12px 14px;box-shadow:var(--shadow)}
+.stat-num{font-weight:900;font-size:20px}
+.stat-label{font-size:12px;color:var(--muted)}
+
+.section{margin:34px 0}
+.section-head{text-align:center;margin-bottom:14px}
+.section-title{font-size:22px;margin:0 0 6px}
+.section-sub{color:var(--muted);margin:0}
+
+/* Fancy tile cards with animated gradient border */
+.landing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:14px}
+.tile-card{position:relative;display:block;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;text-decoration:none;color:inherit;box-shadow:0 6px 20px rgba(0,0,0,.06);overflow:hidden;isolation:isolate;transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease}
+.tile-card::before{content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1px;background:linear-gradient( 120deg, rgba(255,143,176,.8), rgba(255,214,222,.8), rgba(255,143,176,.8) ); -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; opacity:0; transition:opacity .25s}
+.tile-card:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(0,0,0,.12);border-color:transparent}
+.tile-card:hover::before{opacity:1}
+.tile-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.tile-kicker{font-weight:900;letter-spacing:.06em;color:#7a0a14}
+.dot{width:8px;height:8px;border-radius:999px;background:linear-gradient(90deg,var(--grad-2),var(--grad-3))}
+.tile-title{font-weight:800;margin-bottom:4px}
+.tile-desc{color:#666;font-size:13px}
+
+/* Steps row */
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:8px}
+.step{display:flex;gap:12px;align-items:flex-start;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:12px;box-shadow:var(--shadow)}
+.step-num{flex:0 0 auto;display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:linear-gradient(135deg,var(--brand-mid),var(--brand));color:#fff;font-weight:900}
+.step-title{font-weight:800;margin-bottom:2px}
+.step-desc{color:#555;font-size:13px}
+
+/* FAQ */
+.faq .faq-item{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:10px 12px;margin-bottom:10px;box-shadow:var(--shadow)}
+.faq summary{cursor:pointer;list-style:none;position:relative;font-weight:700}
+.faq summary::-webkit-details-marker{display:none}
+.faq summary::after{content:"+";position:absolute;right:0;top:0;font-weight:900;color:#7a0a14}
+.faq details[open] summary::after{content:"–"}
+.faq .faq-body{margin-top:8px;color:#555;font-size:14px}
+
+/* Footer */
+.landing-footer{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:18px 22px;color:#666;border-top:1px solid var(--border);background:#fff;position:relative;z-index:2}
+.landing-footer a{color:#7a0a14;text-decoration:none;border-bottom:1px dotted rgba(167,11,19,.35)}
+.landing-footer a:hover{border-bottom-style:solid}
+.footer-links{display:flex;gap:12px}
+
+/* ===================== SHARED MAP LAYOUT (unchanged) ===================== */
+header{
+  position:relative;display:flex;align-items:center;justify-content:space-between;
+  padding:16px 24px;color:#fff;background:
+  radial-gradient(1200px 300px at 20% -50%, rgba(255,255,255,.18), transparent 60%),
+  linear-gradient(100deg, var(--brand-mid) 0%, var(--brand) 45%, var(--brand-dark) 100%);
+  box-shadow:var(--shadow);
+}
+.header-accent{height:3px;background:linear-gradient(90deg,#ffd7e3 0%,#ffc1d4 30%,#ff8fb0 60%,#ffd7e3 100%);}
+.brand{font-size:20px;font-weight:800}
+.brand-badge{display:inline-block;height:22px;min-width:22px;padding:0 8px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);font-size:12px;line-height:22px;font-weight:700}
+.toolbar{display:flex;gap:12px;align-items:center}
+.cssbuttons-io.small span{padding:10px 14px}
+#contextBar{display:flex;justify-content:center;gap:40px;background:#fff;border-bottom:1px solid var(--border);font-size:13px;font-weight:500;color:#333;padding:8px 0;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+#contextBar span{min-width:120px;text-align:center;}
+#viewDiv{flex:1;position:relative;background:#fff}
+#parcelStats{position:absolute;right:15px;bottom:70px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:12px 16px;font-size:13px;box-shadow:var(--shadow);z-index:1000;min-width:220px;}
+#statusBar{display:flex;justify-content:center;gap:40px;background:#fafafa;border-top:1px solid var(--border);font-size:12px;color:#555;padding:6px 0;box-shadow:0 -1px 3px rgba(0,0,0,.06);}
+#statusBar span{min-width:120px;text-align:center;}
+footer{border-top:1px solid var(--border);background:#fff;text-align:center;font-size:12px;color:#666;padding:8px 0;}
+.esri-widget{border-radius:10px!important;background:#fff!important;box-shadow:var(--shadow);border:1px solid var(--border);}
+.search-dock{max-width:340px;width:100%;padding:10px;background:#fff;border-radius:10px;box-shadow:var(--shadow);border:1px solid var(--border);}
+.card.esri-widget{padding:16px;min-width:320px;font-size:13px;line-height:1.4;background:#fff;border-radius:10px;box-shadow:var(--shadow);border:1px solid var(--border);}
+.badge{display:inline-block;font-size:12px;font-weight:600;background:#fbe9ef;color:var(--brand);border:1px solid #f1c6d2;border-radius:999px;padding:4px 10px;margin-bottom:12px;}
+.meta-line{margin:8px 0;color:#444;display:flex;align-items:center;gap:6px;}
+.legend-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;}
+
+/* ---------- LAYOUT FILL FIX (make the map fill the middle) ---------- */
+body{display:flex;flex-direction:column;}
+header,#contextBar,#statusBar,footer{flex:0 0 auto;}
+main{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
+#viewWrap{flex:1 1 auto;display:flex;min-height:0;}
+#viewDiv{flex:1 1 auto;height:100%;width:100%;}
+
+/* Landing responsive tweaks */
+@media (max-width: 720px){
+  .hero-stats{grid-template-columns:1fr 1fr}
+  .landing-header{padding:12px 16px}
+  .top-actions{display:none}
+}
+
+/* ========== LOADING ANIMATION ========== */
+/* From Uiverse.io by ZacharyCrespin */
+@keyframes square-animation {
+  0% { left: 0; top: 0; }
+  10.5% { left: 0; top: 0; }
+  12.5% { left: 32px; top: 0; }
+  23% { left: 32px; top: 0; }
+  25% { left: 64px; top: 0; }
+  35.5% { left: 64px; top: 0; }
+  37.5% { left: 64px; top: 32px; }
+  48% { left: 64px; top: 32px; }
+  50% { left: 32px; top: 32px; }
+  60.5% { left: 32px; top: 32px; }
+  62.5% { left: 32px; top: 64px; }
+  73% { left: 32px; top: 64px; }
+  75% { left: 0; top: 64px; }
+  85.5% { left: 0; top: 64px; }
+  87.5% { left: 0; top: 32px; }
+  98% { left: 0; top: 32px; }
+  100% { left: 0; top: 0; }
+}
+
+.loader { position: relative; width: 96px; height: 96px; transform: rotate(45deg); }
+.loader-square {
+  position: absolute; top: 0; left: 0; width: 28px; height: 28px; margin: 2px;
+  background: var(--brand, #a70b13);
+  animation: square-animation 10s ease-in-out infinite both;
+}
+.loader-square:nth-of-type(1) { animation-delay: 0s; }
+.loader-square:nth-of-type(2) { animation-delay: -1.4285714286s; }
+.loader-square:nth-of-type(3) { animation-delay: -2.8571428571s; }
+.loader-square:nth-of-type(4) { animation-delay: -4.2857142857s; }
+.loader-square:nth-of-type(5) { animation-delay: -5.7142857143s; }
+.loader-square:nth-of-type(6) { animation-delay: -7.1428571429s; }
+.loader-square:nth-of-type(7) { animation-delay: -8.5714285714s; }
+.loader-square:nth-of-type(8) { animation-delay: -10s; }
+
+/* ===================== LOADING OVERLAY (CENTERED) ===================== */
+#loadingOverlay{
+  position:absolute;
+  inset:0;
+  display:none;              /* hidden by default */
+  place-items:center;        /* grid centering */
+  background:rgba(255,255,255,0.7);
+  backdrop-filter:blur(2px);
+  z-index:2000;
+  pointer-events:auto;       /* block clicks while loading */
+  grid-auto-flow:row;
+  gap:12px;
+}
+
+#loadingOverlay.show{        /* toggle this class to show */
+  display:grid;
+}
+
+#loadingOverlay .label{
+  font-weight:700;
+  color:#333;
+  text-align:center;
+  margin-top:12px;
+}
+
+#loadingOverlay .loader{
+  margin:0 auto;
+  transform:rotate(45deg);
+}
+
+/* Home button variant */
+.cssbuttons-io.home {
+  background: linear-gradient(90deg, #ffffff, #f9f9f9);
+  color: var(--brand);
+  border: 1px solid var(--brand);
+}
+
+.cssbuttons-io.home:hover {
+  background: #fff0f2;
+  box-shadow: 0 6px 18px rgba(167, 11, 19, 0.22);
+}
+.council-wrap{max-width:980px;margin:36px auto 28px;padding:0 18px}
+.council-head h1{font-weight:900}
+.council-sub{color:var(--muted)}
+.council-list{display:flex;flex-direction:column;gap:12px}
+.council-item{display:flex;justify-content:space-between;align-items:center;gap:14px;
+  padding:14px 16px;border:1px solid var(--border);border-radius:14px;background:var(--panel);
+  text-decoration:none;color:inherit;box-shadow:0 6px 18px rgba(0,0,0,.06);
+  transition:transform .18s ease, box-shadow .2s ease, border-color .2s ease, background .2s ease}
+.council-item:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.12);border-color:transparent}
+.council-item:focus-visible{outline:3px solid rgba(167,11,19,.3);outline-offset:2px}
+.council-left{display:flex;align-items:center;gap:12px}
+.council-code{font-weight:900;letter-spacing:.06em;color:#7a0a14}
+.council-name{font-weight:800}
+.council-right{color:var(--muted);font-weight:600;font-size:13px;display:flex;gap:8px;align-items:center}
+.council-right svg{width:18px;height:18px}
+.chip{display:inline-grid;place-items:center;width:8px;height:8px;border-radius:999px;background:linear-gradient(90deg,var(--grad-2),var(--grad-3))}
+@media (max-width:720px){ .council-item{padding:12px 14px} .council-right{display:none} }
+
+/* ========= BACKGROUND EFFECTS ========= */
+
+/* Grain overlay */
+.grain {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0.08;
+  mix-blend-mode: multiply;
+  background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAoEBGd6UuN8AAAAASUVORK5CYII=');
+  background-size: 256px 256px;
+  z-index: 0;
+}
+
+/* Floating gradient blobs */
+.bg-orb {
+  position: fixed;
+  border-radius: 999px;
+  filter: blur(120px);
+  opacity: 0.55;
+  animation: floatOrb 22s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 0;
+}
+.orb-1 {
+  width: 480px; height: 480px;
+  top: -100px; left: -120px;
+  background: radial-gradient(circle, #920016 0%, transparent 70%);
+  animation-delay: 0s;
+}
+.orb-2 {
+  width: 620px; height: 620px;
+  bottom: -180px; right: -180px;
+  background: radial-gradient(circle, #b10a1c 0%, transparent 70%);
+  animation-delay: 5s;
+}
+.orb-3 {
+  width: 700px; height: 500px;
+  top: 10%; left: 40%;
+  background: radial-gradient(circle, #d80d0d 0%, transparent 70%);
+  animation-delay: 10s;
+}
+
+.orb-4 {
+  width: 400px; height: 400px;
+  top: 50%; left: 20%;
+  background: radial-gradient(circle, #7a0202 0%, transparent 90%);
+  animation-delay: 30s;
+}
+/* Floating animation */
+@keyframes floatOrb {
+  0%   { transform: translate(0,0) scale(1); }
+  50%  { transform: translate(40px,-30px) scale(1.1); }
+  100% { transform: translate(-30px,20px) scale(0.95); }
+}
+
+/* Council selection card with image */
+.council-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 16px;
+  height: 160px;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.18);
+  transition: transform .2s ease, box-shadow .3s ease;
+  background-size: cover;
+  background-position: center;
+}
+
+.council-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0.15));
+  z-index: 1;
+}
+
+.council-card span {
+  position: relative;
+  z-index: 2;
+}
+
+.council-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 22px rgba(0,0,0,0.28);
+}
+
+/* ===== Council card layout fix ===== */
+.only-landing {
+  position: relative;
+  z-index: 1;
+  display: block;
+  margin-inline: auto;
+  max-width: 1200px;   /* keeps it centered */
+  padding: 40px 24px;  /* fixes padding on all sides */
+}
+
+.tile-card {
+  position: relative;
+  display: block;
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  text-decoration: none;
+  color: inherit;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+.tile-card img {
+  width: 100%;
+  height: 180px;
+  object-fit: fill;
+  display: block;
+  border-radius: 10px;
+}
+.tile-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(0,0,0,.16);
+}
+.tile-body {
+  padding: 20px;
+  color: #ffffff;
+  text-shadow:
+    -1px 1px 0 rgb(0, 0, 0),  /* Bottom-left shadow */
+    1px 1px 0 rgb(0, 0, 0); 
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+}
+.tile-kicker {
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+.tile-title {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+/* --- HEADER BAR --- */
+.landing-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 32px;
+  background: linear-gradient(90deg, var(--brand-mid), var(--brand));
+  color: #000000;
+  box-shadow: 0 3px 12px rgba(0,0,0,0.1);
+}
+
+
+
+.landing-header .top-actions {
+  display: flex;
+  gap: 20px;
+}
+
+.landing-header .top-actions a {
+  text-decoration: none;
+  color: #000000;
+  font-weight: 600;
+  transition: opacity 0.2s ease;
+}
+
+.landing-header .top-actions a:hover {
+  opacity: 0.8;
+}
+
+.landing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* 3 per row */
+  gap: 20px;
+  margin: 30px auto;
+  max-width: 1100px;
+
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;           /* more breathing room */
+  margin-top: 24px;
+}
+
+/* --- HEADER BAR (polished professional style) --- */
+.landing-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 36px;
+  background: linear-gradient(90deg, var(--brand-mid), var(--brand-dark));
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+}
+
+
+
+/* Top right nav links */
+.landing-header .top-actions {
+  display: flex;
+  gap: 24px;
+}
+
+.landing-header .top-actions a {
+  position: relative;
+  text-decoration: none;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 15px;
+  padding: 4px 0;
+  transition: color 0.2s ease;
+}
+
+.landing-header .top-actions a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -4px;
+  width: 100%;
+  height: 2px;
+  background: #ffffff;
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.25s ease;
+}
+
+.landing-header .top-actions a:hover {
+  color: #000000;
+}
+
+.landing-header .top-actions a:hover::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+
+
+
+
+
+
+  </style>
+
+</head>
+<body class="only-landing-body">
+  <!-- ===== Professional Splash / Intro ===== -->
+  <div id="logo-splash" aria-hidden="true">
+    <div class="splash-inner" role="status" aria-label="Loading Cornerstone Interactive Mapping">
+      <img class="splash-logo" src="./images/Flavour icon.png" alt="Cornerstone logo">
+      <div class="splash-wordmark">Cornerstone Interactive Mapping</div>
+      <div class="progress"><span class="bar" aria-hidden="true"></span></div>
+    </div>
+  </div>
+
+  <!-- ===== Your existing background visuals ===== -->
+  <div class="grain"></div>
+  <div class="bg-orb orb-1"></div>
+  <div class="bg-orb orb-2"></div>
+  <div class="bg-orb orb-3"></div>
+  <div class="bg-orb orb-4"></div>
+
+  <!-- ===== Header ===== -->
+  <div class="landing-header">
+    <div class="brand">
+      <a href="https://www.cornerstonebc.com.au/#building-certification-queensland">
+        <span class="brand-logo"><img src="./images/250916 Cornerstone Logo.png" alt="Cornerstone" style="height:64px"></span>
+      </a>
+    </div>
+    <div class="top-actions">
+      <a href="https://accounts.cornerstonebc.com.au/frm/uxUQyjTNbfAhwdPV" class="link-ghost">Request a Quote</a>
+      <a href="mailto:Support@Cornerstonebc.com.au" class="link-ghost">Support</a>
+      <a href="/public/Account.html" class="link-ghost">My Account</a>
+    </div>
+  </div>
+
+  <!-- ===== Content ===== -->
+  <div class="only-landing">
+    <div class="hero">
+      <h1 class="hero-title"><span class="grad-text">Cornerstone Interactive Mapping</span></h1>
+      <h1 class="hero-title"><span class="grad-text">Choose your council</span></h1>
+    </div>
+
+    <div class="landing-grid">
+      <a href="BCC.html" class="tile-card">
+        <img src="images/Brisbane.jpg" alt="Brisbane City">
+        <div class="tile-body"><div class="tile-title">Brisbane City Council</div></div>
+      </a>
+
+      <a href="MBRC.html" class="tile-card">
+        <img src="images/Moreton.jpg" alt="Moreton Bay">
+        <div class="tile-body"><div class="tile-title">Moreton Bay Regional Council</div></div>
+      </a>
+
+      <a href="LCC.html" class="tile-card">
+        <img src="images/logan.jpg" alt="Logan City">
+        <div class="tile-body"><div class="tile-title">Logan City Council</div></div>
+      </a>
+
+      <a href="SCRC.html" class="tile-card">
+        <img src="images/Sunshine.jpg" alt="Sunshine Coast">
+        <div class="tile-body"><div class="tile-title">Sunshine Coast Council</div></div>
+      </a>
+
+      <a href="GCCC.html" class="tile-card">
+        <img src="images/Gold.jpg" alt="Gold Coast">
+        <div class="tile-body"><div class="tile-title">City of Gold Coast</div></div>
+      </a>
+
+      <a href="SRRC.html" class="tile-card">
+        <img src="images/Scenic.jpg" alt="Scenic Rim">
+        <div class="tile-body"><div class="tile-title">Scenic Rim Regional Council</div></div>
+      </a>
+
+      <a href="RCC.html" class="tile-card">
+        <img src="images/Redlands.jpg" alt="Redland City">
+        <div class="tile-body"><div class="tile-title">Redland City Council</div></div>
+      </a>
+
+      <a href="ICC.html" class="tile-card">
+        <img src="images/ipswich.jpg" alt="Ipswich City">
+        <div class="tile-body"><div class="tile-title">Ipswich City Council</div></div>
+      </a>
+
+      <a href="NSC.html" class="tile-card">
+        <img src="images/Noosa.jpg" alt="Noosa Shire">
+        <div class="tile-body"><div class="tile-title">Noosa Shire Council</div></div>
+      </a>
+  
+      <a href="TRC.html" class="tile-card">
+        <img src="images/Toowoomba.jpg" alt="Toowoomba Regional">
+        <div class="tile-body"><div class="tile-title">Toowoomba Regional council</div></div>
+      </a>
+
+      <a href="GRC.html" class="tile-card">
+        <img src="images/Gympie.jpg" alt="Gympie Regional">
+        <div class="tile-body"><div class="tile-title">Gympie Regional council</div></div>
+      </a>
+
+
+      <a href="FCRC.html" class="tile-card">
+        <img src="images/FraserCoast.jpg" alt="Fraser Coast Regional">
+        <div class="tile-body"><div class="tile-title">Fraser Coast Regional council</div></div>
+      </a>
+    </div>
+  </div>
+
+  <!-- ===== Footer ===== -->
+  <footer class="landing-footer">
+    <span>© Cornerstone Building Certifaction — Cornerstone Interactive Mapping</span>
+    <div class="footer-links">
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
+    </div>
+  </footer>
+
+  <!-- ===== Splash Control Script ===== -->
+  <script>
+  (function() {
+    // Show only on first page open per session. Remove these two lines to always show.
+    var key = "cs_splash_shown_v2";
+    if (sessionStorage.getItem(key)) { var s=document.getElementById("logo-splash"); if (s) s.remove(); return; }
+    sessionStorage.setItem(key,"1");
+
+    var splash = document.getElementById("logo-splash");
+    if (!splash) return;
+
+    // Skip button
+    var skipBtn = splash.querySelector(".splash-skip");
+    function removeSplash(){
+      if (!splash) return;
+      splash.style.display = "none";
+      splash = null;
+    }
+    skipBtn.addEventListener("click", removeSplash);
+
+    // Remove when the fade-out completes
+    splash.addEventListener("animationend", function(e){
+      if (e.animationName === "splash-out") removeSplash();
+    });
+
+    // Hard failsafe in case of unusual timing
+    window.addEventListener("load", function(){
+      setTimeout(removeSplash, 3200);
+    });
+
+    // Keyboard escape
+    document.addEventListener("keydown", function(e){ if (e.key === "Escape") removeSplash(); });
+
+    // Respect reduced motion: instantly remove on load
+    var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (mq.matches) {
+      removeSplash();
+    }
+  })();
+  </script>
+</body>
 </html>

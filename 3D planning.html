@@ -1,0 +1,2093 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Subdivision + Building  Robust AU Address</title>
+
+<!-- ArcGIS JS -->
+<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css">
+
+<!-- PDF.js -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
+<script>
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+  window.pdfjsLib.disableWorker = true;
+</script>
+
+<!-- OCR fallback (guarded) -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+  :root{--bg:#f6f7fb;--panel:#fff;--muted:#667085;--ink:#1f2328;--accent:#a70b13;--accent-dark:#7d0810;--border:#e5e7eb}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14.5px/1.58 system-ui,-apple-system,"Segoe UI",Inter,Roboto,sans-serif}
+  .app{display:grid;grid-template-columns:360px 1fr;height:100vh}
+  aside{background:#fff;border-right:1px solid var(--border);padding:18px;overflow:auto;display:flex;flex-direction:column;gap:16px}
+  h3{margin:0 0 6px;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-dark)}
+  .card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:0 10px 24px rgba(15,23,42,.06)}
+  .row{display:flex;gap:8px;align-items:center}.row .grow{flex:1}
+  .row.wrap{flex-wrap:wrap}
+  .muted{color:var(--muted)}
+  input,select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:#fff}
+  input[type="range"]{padding:0;height:34px}
+  .btn{border:0;border-radius:999px;padding:8px 14px;font-weight:700;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-dark));cursor:pointer}
+  .btn.secondary{background:#fff;color:var(--ink);border:1px solid var(--border);font-weight:600}
+  .btn.small{padding:6px 10px;font-size:13px}
+  label.file{display:inline-grid;place-items:center;height:36px;padding:0 12px;border-radius:999px;border:1px dashed #e2a2a2;color:var(--accent-dark);background:#fff;cursor:pointer;font-weight:700}
+  label.file input{display:none}
+  label.layerToggle{display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0;color:var(--ink)}
+  label.layerToggle input{margin:0}
+  #viewer{position:relative;min-height:100vh}#viewDiv{position:absolute;inset:0}
+  #imgStatus{position:absolute;right:14px;top:14px;padding:8px 10px;border-radius:10px;background:#fff;border:1px solid var(--border);box-shadow:0 12px 28px rgba(15,23,42,.12);font-size:12.5px;display:none;z-index:5}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="card">
+      <h3>ArcGIS Globe</h3>
+      <div class="row muted">Tokens are stored locally. Search by address or <code>lat,lon</code> (AU only).</div>
+      <div class="row">
+        <button id="applyIon" class="btn secondary small">Save ArcGIS key</button>
+        <button id="applyKey" class="btn secondary small">Use shared key</button>
+        <div id="tokenStatus" class="muted" style="margin-left:auto">Using shared key</div>
+      </div>
+      <div class="row">
+        <input id="addr" class="grow" placeholder="Search address or 'lat,lon'">
+        <button id="geoBtn" class="btn small">Search</button>
+      </div>
+      <div class="row">
+        <button id="basemapToggle" class="btn secondary small">Basemap: Simple</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Parcel Lookup</h3>
+      <div class="muted">If a PoD omits the lot/plan text, paste it here (e.g. <code>Lot 19 RP90746</code>).</div>
+      <div class="row" style="margin-top:8px">
+        <input id="lotPlanInput" placeholder="Lot / Plan" style="width:140px">
+        <button id="applyLotPlan" class="btn small">Locate</button>
+      </div>
+      <div id="lotPlanMsg" class="muted">Uses QLD DCDB parcel geometry.</div>
+    </div>
+
+    <div class="card">
+      <h3>Layers</h3>
+      <label class="layerToggle"><input type="checkbox" id="layerParcels" checked>QLD property boundaries</label>
+      <label class="layerToggle"><input type="checkbox" id="layerPropertyInfo">Property info (lot labels)</label>
+      <label class="layerToggle"><input type="checkbox" id="layerAerial">Aerial imagery (Esri)</label>
+      <label class="layerToggle"><input type="checkbox" id="layerPlanning">Planning overlays</label>
+      <label class="layerToggle"><input type="checkbox" id="layerEnvironment">Environmental constraints</label>
+      <label class="layerToggle"><input type="checkbox" id="layerTransport">Transport corridors</label>
+      <div class="muted" style="font-size:12px;margin-top:6px">Layers stream live from Queensland/Esri services; unavailable layers will log a warning in console.</div>
+    </div>
+
+    <div class="card">
+      <h3>Subdivision (Plan of Development)</h3>
+      <div class="row">
+        <label class="file">Upload PoD PDF<input id="podPdf" type="file" accept="application/pdf,.pdf"></label>
+        <span id="podMsg" class="muted">No PoD loaded.</span>
+      </div>
+      <div class="muted">Finds the <b>estate/subdivision address</b> (not RPD), optional <b>coords</b> (Lat/Lon), and <b>Lot</b> labels.</div>
+      <div class="row">
+        <select id="lotSelect"><option value=""> Select lot </option></select>
+        <button id="placeOnLot" class="btn small" disabled>Place building on lot</button>
+        <button id="clearLots" class="btn secondary small" disabled>Clear lots</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Manual Lots</h3>
+      <div class="muted">Trace proposed lots directly on the globe. Click to add vertices; double-click or hit <b>Finish</b>.</div>
+      <div class="row" style="margin:6px 0">
+        <button id="lotGuessBtn" class="btn secondary small" style="width:100%">Guess lots from outline</button>
+      </div>
+      <div class="row wrap" style="gap:6px">
+        <button id="lotDrawStart" class="btn small">Start drawing</button>
+        <button id="lotDrawUndo" class="btn secondary small" disabled>Undo</button>
+        <button id="lotDrawFinish" class="btn secondary small" disabled>Finish</button>
+        <button id="lotDrawCancel" class="btn secondary small" disabled>Cancel</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button id="lotDrawClear" class="btn secondary small" disabled>Clear saved lots</button>
+        <button id="lotDrawExport" class="btn secondary small" disabled style="margin-left:auto">Copy GeoJSON</button>
+      </div>
+      <div id="lotDrawStatus" class="muted">Click “Start drawing” to add a custom lot.</div>
+    </div>
+
+    <div class="card">
+      <h3>Building (from plan)</h3>
+      <div class="row">
+        <label class="file">Upload Plan PDF<input id="planPdf" type="file" accept="application/pdf"></label>
+        <span id="pdfMsg" class="muted">No plan loaded.</span>
+      </div>
+      <div class="row"><div class="grow">Width (m)</div><input id="wMeter" type="number" step="0.01" value="10" style="width:110px"></div>
+      <div class="row"><div class="grow">Length (m)</div><input id="lMeter" type="number" step="0.01" value="8" style="width:110px"></div>
+      <div class="row"><div class="grow">Height (m)</div><input id="hMeter" type="number" step="0.1" value="3" style="width:110px"></div>
+      <div class="row"><div class="grow">Yaw ()</div><input id="yaw" type="range" min="-180" max="180" value="0" class="grow"></div>
+      <div class="row"><div class="grow">Offset E/N (m)</div>
+        <input id="offsetEast" type="number" step="0.1" value="0" style="width:70px">
+        <input id="offsetNorth" type="number" step="0.1" value="0" style="width:70px">
+      </div>
+      <div class="row">
+        <button id="applySize" class="btn">Apply size</button>
+        <button id="resetView" class="btn secondary">Reset view</button>
+      </div>
+    </div>
+  </aside>
+
+  <div id="viewer">
+    <div id="viewDiv"></div>
+    <div id="imgStatus"></div>
+  </div>
+</div>
+
+<script type="module">
+import esriConfig from "https://js.arcgis.com/4.30/@arcgis/core/config.js";
+import WebScene from "https://js.arcgis.com/4.30/@arcgis/core/WebScene.js";
+import SceneView from "https://js.arcgis.com/4.30/@arcgis/core/views/SceneView.js";
+import Basemap from "https://js.arcgis.com/4.30/@arcgis/core/Basemap.js";
+import TileLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/TileLayer.js";
+import FeatureLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/FeatureLayer.js";
+import GraphicsLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js";
+import Graphic from "https://js.arcgis.com/4.30/@arcgis/core/Graphic.js";
+import Polygon from "https://js.arcgis.com/4.30/@arcgis/core/geometry/Polygon.js";
+import Polyline from "https://js.arcgis.com/4.30/@arcgis/core/geometry/Polyline.js";
+import Camera from "https://js.arcgis.com/4.30/@arcgis/core/Camera.js";
+import * as webMercatorUtils from "https://js.arcgis.com/4.30/@arcgis/core/geometry/support/webMercatorUtils.js";
+
+/* ===== basics ===== */
+var statusBanner=document.getElementById('imgStatus'); var statusToken=0;
+function showStatus(m){statusToken++;statusBanner.textContent=m;statusBanner.style.display='block';return statusToken}
+function hideStatus(t){if(t===undefined||t===statusToken)statusBanner.style.display='none'}
+function valNum(id,f){var el=document.getElementById(id);var v=parseFloat(el&&el.value);return isFinite(v)?v:f}
+var AU={latMin:-44,latMax:-10,lonMin:111,lonMax:156};
+function inAU(lat,lon){return lat>=AU.latMin&&lat<=AU.latMax&&lon>=AU.lonMin&&lon<=AU.lonMax}
+function normalize(s){return (s||'').replace(/\u00A0/g,' ').replace(/\u00D7/g,'x').replace(/\s+/g,' ').trim()}
+var podStatusEl=document.getElementById('podMsg');
+function setPodStatus(msg,isError){
+  if(!podStatusEl) return;
+  podStatusEl.textContent=msg;
+  if(isError){
+    podStatusEl.classList.remove('muted');
+    podStatusEl.style.color='#b91c1c';
+  }else{
+    podStatusEl.style.color='';
+    if(!podStatusEl.classList.contains('muted')) podStatusEl.classList.add('muted');
+  }
+}
+if(podStatusEl) setPodStatus(podStatusEl.textContent||'No PoD loaded.',false);;
+
+/* ===== ArcGIS scene ===== */
+var lotPlanInput=document.getElementById('lotPlanInput');
+var lotPlanBtn=document.getElementById('applyLotPlan');
+var lotPlanMsg=document.getElementById('lotPlanMsg');
+function setLotPlanStatus(msg,isError){
+  if(!lotPlanMsg) return;
+  lotPlanMsg.textContent=msg;
+  if(isError){
+    lotPlanMsg.style.color='#b91c1c';
+  }else{
+    lotPlanMsg.style.color='';
+  }
+}
+if(lotPlanMsg) setLotPlanStatus(lotPlanMsg.textContent||'Uses QLD DCDB parcel geometry.',false);
+var basemapBtn=document.getElementById('basemapToggle');
+var DCDB_FEATURE_URL='https://gisservices.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer/4';
+var BCC_PARCEL_API='https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/property-boundaries-parcel/records';
+var overlayLayers={};
+var parcelQueryLayer=null;
+var currentPodState={addr:null,coords:[],lots:[],lotPlan:null,lotPlanGeom:null};
+var lastLatLon={lat:-27.4698,lon:153.0251};
+var usingSimple=true;
+var LOT_PLAN_LAYER_URLS=[DCDB_FEATURE_URL];
+var lotPlanLookupReady=null;
+
+const DEFAULT_ARC_KEY='AAPKc6e43bbc520149f79229d173c04883558jat1YV8r6Xjl50ulCDeLTkHzW0vzUC-9m6ASQvGmPbo4-xY_kAzsJxJZm-j_Unr';
+const storedKey=(localStorage.getItem('arcgis_api_key')||'').trim();
+esriConfig.apiKey=storedKey||DEFAULT_ARC_KEY;
+function hasCustomArcKey(){return !!(localStorage.getItem('arcgis_api_key')||'').trim();}
+const SIMPLE_BASELAYER_URL='https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer';
+const TOPO_BASELAYER_URL='https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer';
+const propertyBasemap=new Basemap({
+  baseLayers:[new TileLayer({url:SIMPLE_BASELAYER_URL,opacity:1})],
+  title:'Property',
+  id:'property-gray'
+});
+const topoBasemap=new Basemap({
+  baseLayers:[new TileLayer({url:TOPO_BASELAYER_URL,opacity:1})],
+  title:'Topographic',
+  id:'topographic'
+});
+const baseScene=new WebScene({
+  basemap:propertyBasemap,
+  ground:'world-elevation'
+});
+const LOCAL_SCENE_URL='scene.json';
+const LOCAL_SCENE_SPEC={"operationalLayers":[{"id":"19a5c46f583-layer-91","title":"QSpatial Land Parcel Property Framework","url":"https://gisservices.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer","refreshInterval":0,"itemId":"b9bb2b8d873240709188db122aa1c005","layerType":"ArcGISMapServiceLayer","visibleLayers":[0,1,2,4,15,16,17]}],"baseMap":{"baseMapLayers":[{"id":"18c679fb712-layer-37","title":"Topographic","visibility":true,"layerType":"VectorTileLayer","styleUrl":"https://cdn.arcgis.com/sharing/rest/content/items/1e7d1784d1ef4b79ba6764d0bd6c3150/resources/styles/root.json"},{"id":"19a5c78cb73-layer-254","disablePopup":true,"title":"Trees","url":"https://basemaps3d.arcgis.com/arcgis/rest/services/OpenStreetMap3D_Trees_Thematic_v1/SceneServer/layers/0","layerType":"ArcGISSceneServiceLayer","layerDefinition":{"definitionExpression":null,"polygonFilter":null}},{"id":"19a5c78cb74-layer-255","disablePopup":true,"title":"Places and Labels","url":"https://basemaps3d.arcgis.com/arcgis/rest/services/OpenStreetMap3D_DarkLabels_v1/SceneServer/layers/0","layerType":"ArcGISSceneServiceLayer","layerDefinition":{"definitionExpression":null,"polygonFilter":null}},{"id":"19a5c78cb74-layer-256","disablePopup":true,"title":"Buildings","url":"https://basemaps3d.arcgis.com/arcgis/rest/services/Esri3D_Buildings_v1/SceneServer/layers/0","visibility":false,"layerType":"ArcGISSceneServiceLayer","layerDefinition":{"definitionExpression":null,"polygonFilter":null}}],"id":"18c679f066c-basemap-24","title":"Topographic","elevationLayers":[{"id":"globalElevation","listMode":"hide","title":"Terrain3D","url":"https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer","layerType":"ArcGISTiledElevationServiceLayer"}]},"ground":{"layers":[{"id":"globalElevation","listMode":"hide","title":"Terrain3D","url":"https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer","layerType":"ArcGISTiledElevationServiceLayer"}],"transparency":0,"surfaceColor":[2,115,0],"navigationConstraint":{"type":"stayAbove"}},"heightModelInfo":{"heightModel":"gravity_related_height","heightUnit":"meter"},"version":"1.38","authoringApp":"WebSceneViewer","authoringAppVersion":"2025.3.0","initialState":{"environment":{"lighting":{"type":"sun","datetime":1678846341000,"directShadows":true,"displayUTCOffset":10},"atmosphereEnabled":true,"starsEnabled":true,"weather":{"type":"cloudy","cloudCover":0.5}},"viewpoint":{"camera":{"position":{"spatialReference":{"latestWkid":3857,"wkid":102100},"x":1.71029229519737E7,"y":-4032602.2210948505,"z":2342197.438496655},"heading":357.1129391696489,"tilt":17.393731638667095}}},"spatialReference":{"latestWkid":3857,"wkid":102100},"viewingMode":"global"};
+var parcelScene=null;
+var parcelSceneLoading=null;
+const view=new SceneView({
+  container:'viewDiv',
+  map:baseScene,
+  qualityProfile:'high',
+  environment:{ atmosphere:{ quality:'high' }, lighting:{ type:'virtual' } }
+});
+view.ui.components=[];
+
+const parcelOutlineLayer=new GraphicsLayer({ listMode:'hide' });
+const boundaryLayer=new GraphicsLayer({ listMode:'hide' });
+const buildingLayer=new GraphicsLayer({ listMode:'hide' });
+const manualLotLayer=new GraphicsLayer({ listMode:'hide' });
+const autoLotLayer=new GraphicsLayer({ listMode:'hide' });
+var managedLayers=[parcelOutlineLayer,boundaryLayer,buildingLayer,manualLotLayer,autoLotLayer];
+
+function refreshTokenStatus(){
+  var el=document.getElementById('tokenStatus');
+  if(!el) return;
+  var custom=(localStorage.getItem('arcgis_api_key')||'').trim();
+  el.textContent=custom?'Using saved ArcGIS key':'Using shared key';
+}
+refreshTokenStatus();
+var btnIon=document.getElementById('applyIon');
+if(btnIon){
+  btnIon.textContent='Set ArcGIS key';
+  btnIon.addEventListener('click',function(){
+    var cur=(localStorage.getItem('arcgis_api_key')||'').trim();
+    var v=prompt('ArcGIS API key:',cur);
+    if(v===null) return;
+    var trimmed=v.trim();
+    if(trimmed){
+      localStorage.setItem('arcgis_api_key',trimmed);
+      esriConfig.apiKey=trimmed;
+    }else{
+      localStorage.removeItem('arcgis_api_key');
+      esriConfig.apiKey=DEFAULT_ARC_KEY;
+    }
+    refreshTokenStatus();
+    loadParcelScene(true);
+  });
+}
+var btnArc=document.getElementById('applyKey');
+if(btnArc){
+  btnArc.textContent='Clear key';
+  btnArc.addEventListener('click',function(){
+    localStorage.removeItem('arcgis_api_key');
+    esriConfig.apiKey=DEFAULT_ARC_KEY;
+    refreshTokenStatus();
+    parcelScene=null;
+    parcelSceneLoading=null;
+    view.map=baseScene;
+    reattachAllLayers(baseScene);
+    setBasemapSimple(usingSimple);
+    loadParcelScene(true);
+    alert('ArcGIS key reset to default shared key.');
+  });
+}
+
+/* ===== overlay catalog ===== */
+var overlayConfigs={
+  parcels:{
+    id:'layerParcels',
+    type:'feature',
+    url:DCDB_FEATURE_URL,
+    alpha:0.85,
+    checked:true,
+    outFields:['LOT','PLAN','PLAN_','LOT_PLAN'],
+    renderer:{
+      type:'simple',
+      symbol:{
+        type:'simple-fill',
+        color:[0,0,0,0],
+        outline:{color:[34,197,94,0.8],width:0.8}
+      }
+    },
+    label:'QLD Property boundaries (DCDB)'
+  },
+  propertyInfo:{
+    id:'layerPropertyInfo',
+    type:'feature',
+    url:DCDB_FEATURE_URL,
+    alpha:1,
+    minScale:20000,
+    outFields:['LOT','PLAN'],
+    renderer:{
+      type:'simple',
+      symbol:{
+        type:'simple-fill',
+        color:[0,0,0,0],
+        outline:{color:[37,99,235,0.9],width:1}
+      }
+    },
+    labelingInfo:[{
+      labelExpressionInfo:{expression:"return 'Lot ' + $feature.LOT + ' ' + $feature.PLAN;"},
+      where:"LOT IS NOT NULL AND PLAN IS NOT NULL",
+      symbol:{
+        type:'text',
+        color:[37,99,235,1],
+        haloColor:[255,255,255,0.95],
+        haloSize:1.5,
+        font:{size:10,weight:'bold'}
+      },
+      labelPlacement:'always-horizontal'
+    }],
+    label:'Property info (lot labels)'
+  },
+  aerial:{
+    id:'layerAerial',
+    url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
+    alpha:0.9,
+    label:'Aerial imagery'
+  },
+  planning:{
+    id:'layerPlanning',
+    url:'https://gisservices.information.qld.gov.au/arcgis/rest/services/Planning/PlanMaking/MapServer',
+    alpha:0.75,
+    label:'Planning overlays'
+  },
+  environment:{
+    id:'layerEnvironment',
+    url:'https://gisservices.information.qld.gov.au/arcgis/rest/services/Environment/ProtectedAreas/MapServer',
+    alpha:0.7,
+    label:'Environmental constraints'
+  },
+  transport:{
+    id:'layerTransport',
+    url:'https://gisservices.information.qld.gov.au/arcgis/rest/services/Transport/StateTransportNetworks/MapServer',
+    alpha:0.7,
+    label:'Transport networks'
+  }
+};
+function buildOverlayLayer(cfg){
+  try{
+    if(cfg.type==='feature'){
+      return new FeatureLayer({
+        url:cfg.url,
+        opacity:cfg.alpha!==undefined?cfg.alpha:1,
+        outFields:cfg.outFields||['*'],
+        popupEnabled:false,
+        minScale:cfg.minScale||0,
+        maxScale:cfg.maxScale||0,
+        renderer:cfg.renderer||null,
+        labelingInfo:cfg.labelingInfo||null,
+        visible:false
+      });
+    }
+    return new TileLayer({ url:cfg.url, opacity:cfg.alpha!==undefined?cfg.alpha:1, visible:false });
+  }catch(err){
+    console.warn('Overlay layer failed for',cfg.url,err);
+    return null;
+  }
+}
+function toggleOverlayLayer(key,on){
+  var cfg=overlayConfigs[key]; if(!cfg || !view) return;
+  var layer=overlayLayers[key];
+  if(on){
+    if(!layer){
+      layer=buildOverlayLayer(cfg);
+      if(!layer) return;
+      overlayLayers[key]=layer;
+    }
+    moveLayerToMap(layer,view.map);
+    layer.visible=true;
+  }else if(layer){
+    layer.visible=false;
+  }
+}
+function currentBasemap(){return usingSimple ? propertyBasemap : topoBasemap;}
+function setBasemapSimple(on){
+  usingSimple=!!on;
+  if(view&&view.map){
+    view.map.basemap = currentBasemap();
+  }
+  if(parcelScene){parcelScene.basemap=currentBasemap();}
+  if(basemapBtn){basemapBtn.textContent = usingSimple ? 'Basemap: Property' : 'Basemap: Topographic';}
+}
+function moveLayerToMap(layer,map){
+  if(!layer||!map) return;
+  var parent=layer.parent;
+  if(parent && parent!==map && parent.remove){parent.remove(layer);}
+  if(map.layers && map.layers.indexOf(layer)===-1){map.add(layer);}
+}
+function reattachAllLayers(map){
+  if(!map) return;
+  managedLayers.forEach(function(layer){moveLayerToMap(layer,map);});
+  Object.keys(overlayConfigs).forEach(function(key){
+    var cfg=overlayConfigs[key];
+    var el=document.getElementById(cfg.id);
+    if(!el || !el.checked) return;
+    var layer=overlayLayers[key];
+    if(!layer){
+      layer=buildOverlayLayer(cfg);
+      if(!layer) return;
+      overlayLayers[key]=layer;
+    }
+    moveLayerToMap(layer,map);
+    layer.visible=true;
+  });
+}
+reattachAllLayers(view.map);
+if(view && view.watch){view.watch('map',function(newMap){reattachAllLayers(newMap);});}
+function cloneSceneSpec(spec){
+  if(!spec) return null;
+  try{
+    return JSON.parse(JSON.stringify(spec));
+  }catch(err){
+    console.warn('Parcel scene spec clone failed',err);
+    return null;
+  }
+}
+function handleParcelSceneFailure(token){
+  hideStatus(token);
+  view.map=baseScene;
+  reattachAllLayers(baseScene);
+  setBasemapSimple(usingSimple);
+  parcelScene=null;
+  parcelSceneLoading=null;
+  var warn=showStatus('Parcel dataset unavailable. Using base map only.');
+  setTimeout(function(){hideStatus(warn);},6000);
+  return null;
+}
+function instantiateParcelSceneFromSpec(spec,token){
+  var json=cloneSceneSpec(spec);
+  if(!json) return Promise.reject(new Error('Parcel scene spec missing'));
+  var scene=WebScene.fromJSON(json);
+  scene.basemap=currentBasemap();
+  return scene.load().then(function(){
+    parcelScene=scene;
+    view.map=scene;
+    reattachAllLayers(scene);
+    setBasemapSimple(usingSimple);
+    hideStatus(token);
+    return scene;
+  });
+}
+function loadParcelScene(force){
+  if(force){
+    parcelScene=null;
+    parcelSceneLoading=null;
+  }
+  if(parcelSceneLoading && !force) return parcelSceneLoading;
+  if(parcelScene && !force){
+    view.map=parcelScene;
+    reattachAllLayers(parcelScene);
+    setBasemapSimple(usingSimple);
+    return Promise.resolve(parcelScene);
+  }
+  var token=showStatus('Loading QSpatial parcel scene...');
+  var sceneSpecPromise=fetch(LOCAL_SCENE_URL+'?_='+(Date.now()))
+    .then(function(resp){
+      if(!resp.ok) throw new Error('scene.json not available');
+      return resp.json();
+    })
+    .catch(function(err){
+      console.warn('Parcel scene fetch failed',err);
+      if(LOCAL_SCENE_SPEC) return cloneSceneSpec(LOCAL_SCENE_SPEC);
+      throw err;
+    });
+  parcelSceneLoading=sceneSpecPromise
+    .then(function(spec){
+      return instantiateParcelSceneFromSpec(spec,token);
+    })
+    .catch(function(err){
+      console.warn('Parcel scene unavailable',err);
+      return handleParcelSceneFailure(token);
+    });
+  return parcelSceneLoading;
+}
+
+var overlayInit=false;
+function initOverlayToggles(){
+  if(overlayInit) return;
+  overlayInit=true;
+  setBasemapSimple(true);
+  Object.keys(overlayConfigs).forEach(function(key){
+    var cfg=overlayConfigs[key];
+    var el=document.getElementById(cfg.id);
+    if(!el) return;
+    if(cfg.checked){el.checked=true;}
+    el.addEventListener('change',function(){toggleOverlayLayer(key,el.checked);});
+    if(cfg.checked) toggleOverlayLayer(key,true);
+  });
+}
+view.when(function(){
+  if(view.popup){
+    view.popup.defaultPopupTemplateEnabled=false;
+    view.popup.autoOpenEnabled=false;
+  }
+  view.popupEnabled=false;
+  if(typeof view.closePopup==='function'){
+    view.closePopup();
+  }else if(view.popup && typeof view.popup.close==='function'){
+    view.popup.close();
+  }
+  initOverlayToggles();
+  loadParcelScene(false);
+}).catch(function(err){
+  console.warn('SceneView initialization warning',err);
+  initOverlayToggles();
+  loadParcelScene(false);
+});
+if(basemapBtn){basemapBtn.addEventListener('click',function(){setBasemapSimple(!usingSimple)});}
+
+
+/* ===== tokens ===== */
+
+/* ===== camera / place ===== */
+function toRad(deg){return (deg||0)*Math.PI/180;}
+function mPerDegLat(phi){phi=toRad(phi);return 111132.92-559.82*Math.cos(2*phi)+1.175*Math.cos(4*phi)-0.0023*Math.cos(6*phi)}
+function mPerDegLon(phi){phi=toRad(phi);return 111412.84*Math.cos(phi)-93.5*Math.cos(3*phi)+0.118*Math.cos(5*phi)}
+function camRangeFor(w,l){
+  var width=Math.max(8,Math.abs(w||0));
+  var length=Math.max(6,Math.abs(l||0));
+  var diag=Math.sqrt(width*width+length*length)||10;
+  return Math.max(120,diag*6);
+}
+function eastNorthToDeg(lat0,lon0,E,N){
+  var metersLat=mPerDegLat(lat0)||111320;
+  var metersLon=mPerDegLon(lat0)||111320;
+  return{
+    lat:lat0+N/metersLat,
+    lon:lon0+E/metersLon
+  };
+}
+function getInputs(){return{w:valNum('wMeter',10),l:valNum('lMeter',8),h:valNum('hMeter',3),y:valNum('yaw',0),e:valNum('offsetEast',0),n:valNum('offsetNorth',0)}}
+function alignCameraNorth(){
+  if(!view) return Promise.resolve();
+  var cam=view.camera.clone();
+  cam.heading=0;
+  cam.roll=0;
+  return view.goTo(cam,{animate:false});
+}
+function uniqLatLon(points){
+  var seen={}, out=[];
+  for(var i=0;i<(points||[]).length;i++){
+    var pt=points[i];
+    if(!pt) continue;
+    var lat=+pt.lat, lon=+pt.lon;
+    if(!isFinite(lat)||!isFinite(lon)) continue;
+    var key=lat.toFixed(6)+','+lon.toFixed(6);
+    if(!seen[key]){seen[key]=1; out.push({lat:lat,lon:lon});}
+  }
+  return out;
+}
+function convexHullLatLon(points){
+  var pts=uniqLatLon(points);
+  if(pts.length<3) return pts;
+  pts.sort(function(a,b){return a.lon===b.lon ? a.lat-b.lat : a.lon-b.lon});
+  function cross(o,a,b){return (a.lon-o.lon)*(b.lat-o.lat)-(a.lat-o.lat)*(b.lon-o.lon);}
+  var lower=[], upper=[];
+  for(var i=0;i<pts.length;i++){
+    while(lower.length>=2 && cross(lower[lower.length-2],lower[lower.length-1],pts[i])<=0){lower.pop();}
+    lower.push(pts[i]);
+  }
+  for(var j=pts.length-1;j>=0;j--){
+    while(upper.length>=2 && cross(upper[upper.length-2],upper[upper.length-1],pts[j])<=0){upper.pop();}
+    upper.push(pts[j]);
+  }
+  upper.pop(); lower.pop();
+  var hull=lower.concat(upper);
+  return hull.length?hull:pts;
+}
+function centerFromLatLon(points){
+  var sumLat=0,sumLon=0,count=0;
+  for(var i=0;i<(points||[]).length;i++){
+    var pt=points[i];
+    if(!pt) continue;
+    var lat=+pt.lat, lon=+pt.lon;
+    if(!isFinite(lat)||!isFinite(lon)) continue;
+    sumLat+=lat;
+    sumLon+=lon;
+    count++;
+  }
+  return count?{lat:sumLat/count,lon:sumLon/count}:null;
+}
+function isValidMGAZone(z){
+  return isFinite(z) && z>=40 && z<=60;
+}
+function guessZoneFromLon(lon){
+  if(!isFinite(lon)) return null;
+  var zone=Math.floor((lon+180)/6)+1;
+  return isValidMGAZone(zone)?zone:null;
+}
+function detectMGAZoneHint(text){
+  if(!text) return null;
+  var patterns=[
+    /\bMGA(?:2020|94)?\s*(?:zone)?\s*(5[0-9])\b/i,
+    /\bGDA(?:2020|94)?\s*(?:zone)?\s*(5[0-9])\b/i,
+    /\bzone\s*(5[0-9])\b/i
+  ];
+  for(var i=0;i<patterns.length;i++){
+    var m=patterns[i].exec(text);
+    if(m){
+      var z=parseInt(m[1],10);
+      if(isValidMGAZone(z)) return z;
+    }
+  }
+  return null;
+}
+function extractMGAPairs(text){
+  var pairs=[];
+  if(!text) return pairs;
+  var seen={};
+  function pushPair(e,n){
+    if(!isFinite(e)||!isFinite(n)) return;
+    if(e<100000||e>900000||n<5000000||n>10000000) return;
+    var key=e.toFixed(3)+','+n.toFixed(3);
+    if(seen[key]) return;
+    seen[key]=true;
+    pairs.push({e:e,n:n});
+  }
+  var labeled=/\b(?:E|EAST(?:ING)?)\s*(?:=|:)?\s*(-?\d{5,7}(?:\.\d+)?)\s*(?:m|metres|meters)?[^\S\r\n]*[,;]?\s*(?:N|NORTH(?:ING)?)\s*(?:=|:)?\s*(-?\d{6,8}(?:\.\d+)?)/ig;
+  var m;
+  while((m=labeled.exec(text))){
+    pushPair(parseFloat(m[1]),parseFloat(m[2]));
+  }
+  var suffixed=/(-?\d{5,7}(?:\.\d+)?)[^\dA-Za-z]{0,4}(?:E|e)\b[^\dA-Za-z]{0,12}(-?\d{6,8}(?:\.\d+)?)[^\dA-Za-z]{0,4}(?:N|n)\b/g;
+  while((m=suffixed.exec(text))){
+    pushPair(parseFloat(m[1]),parseFloat(m[2]));
+  }
+  if(!pairs.length){
+    var lines=text.split(/\r?\n/);
+    for(var i=0;i<lines.length;i++){
+      var line=lines[i];
+      if(!/\b(?:E|N|EAST|NORTH)\b/i.test(line)) continue;
+      var nums=line.match(/-?\d+(?:\.\d+)?/g);
+      if(!nums || nums.length<2) continue;
+      for(var j=0;j<nums.length-1;j++){
+        var e=parseFloat(nums[j]);
+        var n=parseFloat(nums[j+1]);
+        if(e>=100000&&e<=900000&&n>=5000000&&n<=10000000){
+          pushPair(e,n);
+          break;
+        }
+      }
+    }
+  }
+  return pairs;
+}
+function mgaCandidateZones(zoneHint){
+  var zones=[];
+  function add(z){
+    if(isValidMGAZone(z) && zones.indexOf(z)===-1) zones.push(z);
+  }
+  add(zoneHint);
+  add(guessZoneFromLon(lastLatLon && lastLatLon.lon));
+  add(56);
+  add(55);
+  add(54);
+  return zones.length?zones:[56];
+}
+function utmToLatLon(zone,easting,northing){
+  if(!isFinite(zone)||!isFinite(easting)||!isFinite(northing)) return null;
+  var southern=true;
+  var a=6378137;
+  var e=0.08181919084262149;
+  var e1sq=0.006739496742276434;
+  var k0=0.9996;
+  var x=easting-500000;
+  var y=southern ? northing-10000000 : northing;
+  var m=y/k0;
+  var mu=m/(a*(1-Math.pow(e,2)/4-3*Math.pow(e,4)/64-5*Math.pow(e,6)/256));
+  var e1=(1-Math.sqrt(1-Math.pow(e,2)))/(1+Math.sqrt(1-Math.pow(e,2)));
+  var j1=3*e1/2-27*Math.pow(e1,3)/32;
+  var j2=21*Math.pow(e1,2)/16-55*Math.pow(e1,4)/32;
+  var j3=151*Math.pow(e1,3)/96;
+  var j4=1097*Math.pow(e1,4)/512;
+  var fp=mu+j1*Math.sin(2*mu)+j2*Math.sin(4*mu)+j3*Math.sin(6*mu)+j4*Math.sin(8*mu);
+  var sinfp=Math.sin(fp), cosfp=Math.cos(fp);
+  var t1=Math.pow(Math.tan(fp),2);
+  var c1=e1sq*Math.pow(cosfp,2);
+  var r1=a*(1-Math.pow(e,2))/Math.pow(1-Math.pow(e,2)*Math.pow(sinfp,2),1.5);
+  var n1=a/Math.sqrt(1-Math.pow(e,2)*Math.pow(sinfp,2));
+  var d=x/(n1*k0);
+  var lat=fp-(n1*Math.tan(fp)/r1)*(Math.pow(d,2)/2-(5+3*t1+10*c1-4*Math.pow(c1,2)-9*e1sq)*Math.pow(d,4)/24+(61+90*t1+298*c1+45*Math.pow(t1,2)-252*e1sq-3*Math.pow(c1,2))*Math.pow(d,6)/720);
+  var lon=(zone*6-183)*Math.PI/180+(d-(1+2*t1+c1)*Math.pow(d,3)/6+(5-2*c1+28*t1-3*Math.pow(c1,2)+8*e1sq+24*Math.pow(t1,2))*Math.pow(d,5)/120)/cosfp;
+  return {lat:lat*180/Math.PI,lon:lon*180/Math.PI};
+}
+function mgaPairsToLatLon(pairs,zoneHint){
+  if(!pairs||!pairs.length) return [];
+  var zones=mgaCandidateZones(zoneHint);
+  var best=null;
+  for(var i=0;i<zones.length;i++){
+    var zone=zones[i];
+    var converted=[];
+    var validCount=0;
+    for(var j=0;j<pairs.length;j++){
+      var pt=utmToLatLon(zone,pairs[j].e,pairs[j].n);
+      if(pt && isFinite(pt.lat) && isFinite(pt.lon)){
+        converted.push(pt);
+        if(inAU(pt.lat,pt.lon)) validCount++;
+      }
+    }
+    if(!converted.length) continue;
+    var score=validCount || converted.length;
+    if(!best || score>best.score){
+      best={points:converted,score:score};
+    }
+    if(validCount===pairs.length && pairs.length>=3) break;
+  }
+  return best?best.points:[];
+}
+function parseMGAFromPages(pages){
+  var text=(pages||[]).map(function(p){return p && p.text ? p.text : '';}).join('\n');
+  if(!text) return [];
+  var pairs=extractMGAPairs(text);
+  if(!pairs.length) return [];
+  var zone=detectMGAZoneHint(text);
+  var points=mgaPairsToLatLon(pairs,zone);
+  if(points && points.length>=3){
+    points._ordered=true;
+    points._source='mga';
+  }
+  return points;
+}
+
+function rectRing(lat,lon,w,l,yawDeg,e,n,margin){
+  if(!isFinite(lat)||!isFinite(lon)) return [];
+  var yaw=toRad(yawDeg||0);
+  margin=margin||0;
+  var hw=Math.max(0,(w||0)/2)+margin;
+  var hl=Math.max(0,(l||0)/2)+margin;
+  var offsets=[[-hw,-hl],[hw,-hl],[hw,hl],[-hw,hl]];
+  return offsets.map(function(pair){
+    var E=pair[0],N=pair[1];
+    var rotE=E*Math.cos(yaw)-N*Math.sin(yaw);
+    var rotN=E*Math.sin(yaw)+N*Math.cos(yaw);
+    var d=eastNorthToDeg(lat,lon,rotE+(e||0),rotN+(n||0));
+    return [d.lon,d.lat];
+  });
+}
+function goToFootprint(lat,lon,w,l){
+  if(!view||!isFinite(lat)||!isFinite(lon)) return Promise.resolve();
+  var range=camRangeFor(w,l);
+  var latOffsetMeters=range*0.6;
+  var latOffset=latOffsetMeters/(mPerDegLat(lat)||111320);
+  var cam=new Camera({
+    position:{latitude:lat-latOffset,longitude:lon,z:range},
+    heading:0,
+    tilt:65
+  });
+  return view.goTo(cam,{speedFactor:0.75});
+}
+var buildingGraphic=null, boundaryGraphic=null, podOutlineGraphics=[];
+var lastPodOutlinePolygon=null;
+function drawBoundary(lat,lon,w,l,y,e,n){
+  if(!boundaryLayer) return null;
+  boundaryLayer.removeAll();
+  boundaryGraphic=null;
+  if(!isFinite(lat)||!isFinite(lon)) return null;
+  var ring=rectRing(lat,lon,w,l,y,e,n,6);
+  if(!ring.length) return null;
+  var polygon=new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+  boundaryGraphic=new Graphic({
+    geometry:polygon,
+    symbol:{type:'simple-fill',color:[251,146,60,0.18],outline:{color:[234,88,12,1],width:1.5}}
+  });
+  boundaryLayer.add(boundaryGraphic);
+  return boundaryGraphic;
+}
+function placeBuilding(lat,lon,w,l,h,y,opt){
+  if(!view||!isFinite(lat)||!isFinite(lon)) return Promise.resolve(null);
+  opt=opt||{};
+  var ring=rectRing(lat,lon,w,l,y,opt.east||0,opt.north||0,0);
+  if(!ring.length) return Promise.resolve(null);
+  var polygon=new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+  var height=Math.max(1,Math.abs(h||0));
+  var symbol={
+    type:'polygon-3d',
+    symbolLayers:[{
+      type:'extrude',
+      size:height,
+      material:{color:[74,222,128,0.8]},
+      edges:{type:'solid',color:[6,95,70,1]}
+    }]
+  };
+  buildingLayer.removeAll();
+  buildingGraphic=new Graphic({geometry:polygon,symbol:symbol});
+  buildingLayer.add(buildingGraphic);
+  drawBoundary(lat,lon,w,l,y,opt.east||0,opt.north||0);
+  var zoom=opt.zoom!==false;
+  var target=zoom?goToFootprint(lat,lon,w,l):Promise.resolve();
+  return target.then(function(){return buildingGraphic;});
+}
+function placeFromForm(lat,lon,opt){
+  if(!isFinite(lat)||!isFinite(lon)) return Promise.resolve();
+  var p=getInputs();
+  lastLatLon={lat:lat,lon:lon};
+  var alignNorth=!opt||opt.alignNorth!==false;
+  return placeBuilding(lat,lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:opt&&opt.zoom===false?false:true})
+    .then(function(){
+      if(alignNorth) return alignCameraNorth();
+      return null;
+    });
+}
+function clearPodOutline(){
+  podOutlineGraphics=[];
+  parcelOutlineLayer.removeAll();
+  lastPodOutlinePolygon=null;
+  clearAutoLots();
+}
+function renderPodOutlineFromFlat(flat){
+  clearPodOutline();
+  if(!flat || flat.length<6) return null;
+  var ring=[];
+  for(var i=0;i<flat.length;i+=2){
+    ring.push([flat[i],flat[i+1]]);
+  }
+  if(!ring.length) return null;
+  var polygon=new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+  var graphic=new Graphic({
+    geometry:polygon,
+    symbol:{type:'simple-fill',color:[14,165,233,0.08],outline:{color:[14,165,233,1],width:2}}
+  });
+  parcelOutlineLayer.add(graphic);
+  podOutlineGraphics=[graphic];
+  lastPodOutlinePolygon=polygon;
+  var sumLat=0,sumLon=0,count=0;
+  for(var j=0;j<ring.length;j++){
+    sumLon+=ring[j][0];
+    sumLat+=ring[j][1];
+    count++;
+  }
+  return count?{lat:sumLat/count,lon:sumLon/count}:null;
+}
+function showPodOutlineFromCoords(coords){
+  var points=coords||[];
+  var ringSource=(points && points._ordered && points.length>=3)?points:null;
+  var hull=ringSource || convexHullLatLon(points);
+  if(!hull || hull.length<3){
+    clearPodOutline();
+    return null;
+  }
+  var flat=[];
+  for(var i=0;i<hull.length;i++){flat.push(hull[i].lon,hull[i].lat);}
+  return renderPodOutlineFromFlat(flat);
+}
+function showPodOutlineFromRings(rings){
+  if(!rings||!rings.length){clearPodOutline(); return null;}
+  var ring=rings[0], flat=[];
+  for(var i=0;i<ring.length;i++){
+    var pt=ring[i];
+    if(pt && pt.length>=2){flat.push(pt[0],pt[1]);}
+  }
+  return renderPodOutlineFromFlat(flat);
+}
+
+/* ===== Manual lot digitizer ===== */
+var lotGuessBtn=document.getElementById('lotGuessBtn');
+var lotDrawStart=document.getElementById('lotDrawStart');
+var lotDrawUndo=document.getElementById('lotDrawUndo');
+var lotDrawFinish=document.getElementById('lotDrawFinish');
+var lotDrawCancel=document.getElementById('lotDrawCancel');
+var lotDrawClear=document.getElementById('lotDrawClear');
+var lotDrawExport=document.getElementById('lotDrawExport');
+var lotDrawStatus=document.getElementById('lotDrawStatus');
+var manualLotState={active:false,points:[],tempGraphic:null,clickHandle:null,dblHandle:null};
+var manualLots=[];
+var autoLotGraphics=[];
+function manualLotMessage(msg,isError){
+  if(!lotDrawStatus) return;
+  lotDrawStatus.textContent=msg;
+  lotDrawStatus.style.color=isError?'#b91c1c':'';
+}
+function manualLotSymbol(isPreview){
+  return{
+    type:'simple-fill',
+    color:isPreview?[253,224,71,0.2]:[253,224,71,0.12],
+    outline:{color:[202,138,4,1],width:isPreview?1.2:2}
+  };
+}
+function manualLotPolylineSymbol(){
+  return{type:'simple-line',color:[234,88,12,0.9],width:2,style:'dash'};
+}
+function updateManualLotButtons(){
+  var drawing=manualLotState.active;
+  var hasManual=manualLots.length>0;
+  var hasAuto=autoLotGraphics.length>0;
+  if(lotDrawStart) lotDrawStart.disabled=drawing;
+  if(lotDrawUndo) lotDrawUndo.disabled=!drawing || manualLotState.points.length===0;
+  if(lotDrawFinish) lotDrawFinish.disabled=!drawing || manualLotState.points.length<3;
+  if(lotDrawCancel) lotDrawCancel.disabled=!drawing;
+  if(lotDrawClear) lotDrawClear.disabled=!(hasManual||hasAuto);
+  if(lotDrawExport) lotDrawExport.disabled=!(hasManual||hasAuto);
+}
+function detachManualLotHandles(){
+  if(manualLotState.clickHandle){manualLotState.clickHandle.remove();manualLotState.clickHandle=null;}
+  if(manualLotState.dblHandle){manualLotState.dblHandle.remove();manualLotState.dblHandle=null;}
+}
+function mapPointToLonLat(point){
+  if(!point) return null;
+  var geo=point;
+  try{
+    if(point.spatialReference && (point.spatialReference.isWebMercator || point.spatialReference.wkid===3857)){
+      geo=webMercatorUtils.webMercatorToGeographic(point);
+    }
+  }catch(err){}
+  var lon=isFinite(geo.longitude)?geo.longitude:isFinite(geo.x)?geo.x:NaN;
+  var lat=isFinite(geo.latitude)?geo.latitude:isFinite(geo.y)?geo.y:NaN;
+  if(!isFinite(lat)||!isFinite(lon)) return null;
+  return {lat:lat,lon:lon};
+}
+function manualLotRing(points,close){
+  if(!points||points.length<2) return [];
+  var ring=points.map(function(pt){return [pt.lon,pt.lat];});
+  if(close && ring.length){
+    var first=ring[0];
+    var last=ring[ring.length-1];
+    if(first[0]!==last[0]||first[1]!==last[1]){
+      ring.push([first[0],first[1]]);
+    }
+  }
+  return ring;
+}
+function removeManualLotPreview(){
+  if(manualLotState.tempGraphic){
+    manualLotLayer.remove(manualLotState.tempGraphic);
+    manualLotState.tempGraphic=null;
+  }
+}
+function drawManualLotPreview(){
+  removeManualLotPreview();
+  var pts=manualLotState.points;
+  if(!pts || pts.length<2) return;
+  if(pts.length>=3){
+    var ring=manualLotRing(pts,true);
+    if(ring.length<4) return;
+    var polygon=new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+    manualLotState.tempGraphic=new Graphic({geometry:polygon,symbol:manualLotSymbol(true)});
+  }else{
+    var linePoints=manualLotRing(pts,false);
+    if(linePoints.length<2) return;
+    var polyline=new Polyline({paths:[linePoints],spatialReference:{wkid:4326}});
+    manualLotState.tempGraphic=new Graphic({geometry:polyline,symbol:manualLotPolylineSymbol()});
+  }
+  manualLotLayer.add(manualLotState.tempGraphic);
+}
+function addManualLotPoint(mapPoint){
+  var ll=mapPointToLonLat(mapPoint);
+  if(!ll) return;
+  manualLotState.points.push(ll);
+  drawManualLotPreview();
+  updateManualLotButtons();
+}
+function beginManualLot(){
+  if(manualLotState.active || !view) return;
+  manualLotState.active=true;
+  manualLotState.points=[];
+  removeManualLotPreview();
+  manualLotState.clickHandle=view.on('click',function(event){
+    if(!manualLotState.active) return;
+    event.stopPropagation();
+    addManualLotPoint(event.mapPoint);
+  });
+  manualLotState.dblHandle=view.on('double-click',function(event){
+    if(!manualLotState.active) return;
+    event.stopPropagation();
+    finishManualLot();
+  });
+  manualLotMessage('Click to add vertices. Double-click or press Finish to close the lot.',false);
+  updateManualLotButtons();
+}
+function cancelManualLot(silent){
+  if(!manualLotState.active) return;
+  manualLotState.active=false;
+  manualLotState.points=[];
+  removeManualLotPreview();
+  detachManualLotHandles();
+  if(!silent) manualLotMessage('Drawing cancelled.',true);
+  updateManualLotButtons();
+}
+function undoManualLotPoint(){
+  if(!manualLotState.active || manualLotState.points.length===0) return;
+  manualLotState.points.pop();
+  drawManualLotPreview();
+  updateManualLotButtons();
+}
+function finishManualLot(){
+  if(!manualLotState.active) return;
+  if(manualLotState.points.length<3){
+    manualLotMessage('Add at least 3 points before finishing.',true);
+    return;
+  }
+  var ring=manualLotRing(manualLotState.points,true);
+  if(ring.length<4){
+    manualLotMessage('Polygon could not be closed.',true);
+    return;
+  }
+  var polygon=new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+  var graphic=new Graphic({geometry:polygon,symbol:manualLotSymbol(false)});
+  manualLotLayer.add(graphic);
+  manualLots.push({id:manualLots.length+1,graphic:graphic});
+  manualLotState.active=false;
+  manualLotState.points=[];
+  removeManualLotPreview();
+  detachManualLotHandles();
+  manualLotMessage('Saved lot #'+manualLots.length+'. Start drawing to add another.',false);
+  updateManualLotButtons();
+}
+function clearManualLots(){
+  manualLots.forEach(function(entry){
+    if(entry && entry.graphic){manualLotLayer.remove(entry.graphic);}
+  });
+  manualLots=[];
+  clearAutoLots();
+  manualLotMessage('Cleared saved manual/guessed lots.',false);
+  updateManualLotButtons();
+}
+function manualLotsToGeoJSON(){
+  if(!manualLots.length && !autoLotGraphics.length) return null;
+  var features=[];
+  manualLots.forEach(function(entry,idx){
+    var geom=entry.graphic && entry.graphic.geometry;
+    var rings=(geom && geom.rings)||[];
+    if(!rings.length) return;
+    features.push({
+      type:'Feature',
+      properties:{id:entry.id||idx+1,source:'manual'},
+      geometry:{type:'Polygon',coordinates:rings}
+    });
+  });
+  autoLotGraphics.forEach(function(graphic,idx){
+    if(!graphic || !graphic.geometry || !graphic.geometry.rings) return;
+    features.push({
+      type:'Feature',
+      properties:{
+        id:(graphic.attributes&&graphic.attributes.name)||('auto-'+(idx+1)),
+        source:'auto'
+      },
+      geometry:{type:'Polygon',coordinates:graphic.geometry.rings}
+    });
+  });
+  return features.length?{type:'FeatureCollection',features:features}:null;
+}
+function exportManualLots(){
+  var geojson=manualLotsToGeoJSON();
+  if(!geojson){
+    manualLotMessage('No manual lots to export.',true);
+    return;
+  }
+  var text=JSON.stringify(geojson,null,2);
+  var total=(geojson.features||[]).length;
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text)
+      .then(function(){manualLotMessage('Copied '+total+' lot(s) to clipboard.',false);})
+      .catch(function(){
+        manualLotMessage('Clipboard blocked. Copy from the prompt.',true);
+        window.prompt('Manual lots GeoJSON',text);
+      });
+  }else{
+    window.prompt('Manual lots GeoJSON',text);
+  }
+}
+updateManualLotButtons();
+
+/* ===== Auto-clone lots from parcel overlay ===== */
+function clearAutoLots(){
+  autoLotGraphics.forEach(function(entry){
+    if(entry){autoLotLayer.remove(entry);}
+  });
+  autoLotGraphics=[];
+  updateManualLotButtons();
+}
+var parcelQueryLayer=null;
+function getParcelQueryLayer(){
+  var existing=parcelQueryLayer || overlayLayers.parcels || null;
+  if(existing){
+    parcelQueryLayer=existing;
+    if(existing.loadStatus==='loaded'){return Promise.resolve(existing);}
+    if(existing.load){return existing.load().then(function(){return existing;}).catch(function(err){console.warn('Parcel layer load failed',err);return null;});}
+    return Promise.resolve(existing);
+  }
+  var cfg=overlayConfigs && overlayConfigs.parcels;
+  if(!cfg || !cfg.url) return Promise.resolve(null);
+  var layer=new FeatureLayer({url:cfg.url,outFields:['LOT','PLAN','LOT_PLAN'],popupEnabled:false,visible:false});
+  parcelQueryLayer=layer;
+  return layer.load().then(function(){return layer;}).catch(function(err){
+    console.warn('Parcel query layer failed',err);
+    parcelQueryLayer=null;
+    return null;
+  });
+}
+function guessLotsFromOutline(){
+  if(manualLotState.active) cancelManualLot(true);
+  if(!lastPodOutlinePolygon){
+    manualLotMessage('No parcel outline available to guess from.',true);
+    return;
+  }
+  var status=showStatus('Querying property boundaries...');
+  getParcelQueryLayer()
+    .then(function(layer){
+      if(!layer) throw new Error('Parcel layer unavailable');
+      return layer.queryFeatures({
+        geometry:lastPodOutlinePolygon,
+        spatialRelationship:'intersects',
+        outFields:['LOT','PLAN','LOT_PLAN'],
+        returnGeometry:true,
+        outSpatialReference:{wkid:4326},
+        num:400
+      });
+    })
+    .then(function(result){
+      hideStatus(status);
+      clearAutoLots();
+      var features=(result && result.features)||[];
+      if(!features.length){
+        manualLotMessage('No property boundaries intersect this outline.',true);
+        return;
+      }
+      var targetLots=(currentPodState.lots||[]).map(function(l){
+        return (l && l.id)? String(l.id).trim().toUpperCase():null;
+      }).filter(function(val){return !!val;});
+      var filtered=features;
+      if(targetLots.length){
+        filtered=features.filter(function(feat){
+          var attrs=feat.attributes||{};
+          var lot=(attrs.LOT||attrs.lot||'').toString().trim().toUpperCase();
+          return lot && targetLots.indexOf(lot)!==-1;
+        });
+        if(!filtered.length) filtered=features;
+      }
+      filtered.forEach(function(feat,idx){
+        var geom=feat.geometry;
+        if(!geom || !geom.rings || !geom.rings.length) return;
+        var polygon=geom.clone ? geom.clone() : new Polygon({rings:geom.rings,spatialReference:{wkid:4326}});
+        var attrs=feat.attributes||{};
+        var lot=(attrs.LOT||attrs.lot||'').toString().trim();
+        var plan=(attrs.PLAN||attrs.plan||'').toString().trim();
+        var name=lot ? ('Lot '+lot+(plan?' '+plan:'')) : ('Lot '+(idx+1));
+        var graphic=new Graphic({
+          geometry:polygon,
+          symbol:{
+            type:'simple-fill',
+            color:[59,130,246,0.12],
+            outline:{color:[37,99,235,0.95],width:1.4}
+          },
+          attributes:{name:name,source:'auto'}
+        });
+        autoLotLayer.add(graphic);
+        autoLotGraphics.push(graphic);
+      });
+      if(!autoLotGraphics.length){
+        manualLotMessage('Property overlay returned no usable polygons.',true);
+        return;
+      }
+      manualLotMessage('Copied '+autoLotGraphics.length+' lot(s) from parcel overlay.',false);
+      updateManualLotButtons();
+    })
+    .catch(function(err){
+      hideStatus(status);
+      console.warn('Lot guess failed',err);
+      manualLotMessage('Lot guess failed: '+((err&&err.message)||err),true);
+    });
+}
+
+
+
+/* ===== geocoding (AU only) ===== */
+function geocodeAU(q){
+  function call(s){return fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(s)+'&limit=1',{headers:{Accept:'application/json'}}).then(function(r){return r.json()}).then(function(js){return (js && js[0])?{lat:+js[0].lat,lon:+js[0].lon}:null})}
+  return call(q).then(function(hit){if(!hit||!inAU(hit.lat,hit.lon)) return call(q+', Australia'); return hit}).then(function(hit){return (hit&&inAU(hit.lat,hit.lon))?hit:null})
+}
+function centerOnAddress(q){
+  var m=/^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(q);
+  function fly(lat,lon){
+    lastLatLon={lat:lat,lon:lon};
+    var p=getInputs();
+    return placeBuilding(lat,lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true}).then(function(){
+      return alignCameraNorth();
+    });
+  }
+  if(m){
+    var lat=+m[1], lon=+m[2];
+    if(!inAU(lat,lon)){alert('Coordinates outside Australia.');return Promise.resolve(false)}
+    return fly(lat,lon).then(function(){return true});
+  }
+  var t=showStatus('Geocoding');
+  return geocodeAU(q).then(function(hit){
+    hideStatus(t);
+    if(hit) return fly(hit.lat,hit.lon).then(function(){return true});
+    alert('No AU result  enter lat,lon.'); return false;
+  }).catch(function(){hideStatus(t);alert('Geocoding blocked');return false});
+}
+var geoBtn=document.getElementById('geoBtn'); if(geoBtn){geoBtn.addEventListener('click',function(){var a=document.getElementById('addr'); var v=a&&a.value ? a.value.trim() : ''; if(v) centerOnAddress(v);})}
+
+/* ===== PDF helpers ===== */
+function pdfPages(u8){
+  return window.pdfjsLib.getDocument({data:u8}).promise.then(async function(doc){
+    var out=[];
+    for(var i=1;i<=doc.numPages;i++){
+      var p=await doc.getPage(i);
+      var vp=p.getViewport({scale:1}); // get height/width for header/footer filtering
+      var tc=await p.getTextContent();
+      var items=tc.items.map(function(it){
+        var tr=it.transform||[1,0,0,1,0,0];
+        return {s:normalize(it.str),x:tr[4],y:tr[5],w:it.width||0,h:it.height||0,angle:Math.atan2(tr[1],tr[0])*180/Math.PI};
+      });
+      out.push({index:i,items:items,text:normalize(items.map(function(ii){return ii.s}).join(' ')),width:vp.width,height:vp.height});
+    }
+    return out;
+  });
+}
+function rebuildLines(items,tol){tol=tol||3; var sorted=[].concat(items||[]).sort(function(a,b){return (b.y-a.y)||(a.x-b.x)}); var lines=[]; 
+  for(var k=0;k<sorted.length;k++){var it=sorted[k]; var L=null; for(var j=0;j<lines.length;j++){if(Math.abs(lines[j].y-it.y)<=tol){L=lines[j];break}} if(!L){L={y:it.y,items:[]};lines.push(L)} L.items.push(it)}
+  for(var i=0;i<lines.length;i++){var line=lines[i]; line.items.sort(function(a,b){return a.x-b.x}); line.text=normalize(line.items.map(function(ii){return ii.s}).join(' ')); }
+  return lines;
+}
+
+/* ===== Address extraction (robust) ===== */
+var STREET_TYPES="Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Close|Cl|Boulevard|Blvd|Highway|Hwy|Lane|Ln|Terrace|Terr|Way|Place|Pl|Crescent|Cres|Parade|Pde|Circuit|Circ|Rise|Path|Quay|Square|Sq|Gardens|Gdns|Esplanade|Track|Loop|Vista|Hill|View|Point|Pkwy|Parkway|Promenade|Prom|Motorway|Mwy";
+var HAS_STREET=new RegExp("\\b(?:"+STREET_TYPES+")\\b","i");
+var STATES=/\b(QLD|NSW|VIC|SA|TAS|WA|NT|ACT)\b/i;
+var POSTCODE=/\b\d{4}\b/;
+var RPD_RX=/\b(?:lot|lt)\s+\d{1,4}[A-Za-z]?\s+(?:on\s+)?(?:RP|SP|BUP|GTP|CP|SL)\s*\d+\b/i;
+var JUNK=/^\s*(?:page\s*\d+(?:\s*of\s*\d+)?|sheet\s*\d+(?:\s*of\s*\d+)?|rev(?:ision)?\s*[A-Z0-9]+|stage\s*\d+|scale\b.*|north\b.*|copyright|amendments?)\s*$/i;
+var JUST_NUM=/^[0-9\s\-\/:]+$/;
+var LABEL_PREFIX_RX=/^(?:address|location|site|street|property|project|development|subdivision|estate|client)\s*(?:address|location)?\b\s*[:\-]\s*/i;
+var BOX_RX=/\b(?:P\.?\s*O\.?\s*BOX|PO\s*BOX|GPO\s*BOX)\b/i;
+var CONTACT_RX=/\b(?:PHONE|PH|TEL|FAX|EMAIL|E-MAIL|WEB|WEBSITE|WWW\.|HTTP:\/\/|HTTPS:\/\/)\b/i;
+var COMPANY_RX=/\b(?:PTY|LTD|P\/L)\b/i;
+
+var PLAN_PREFIXES="RP|SP|BUP|GTP|CP|SL|PUP|DP|AP|MP|RPD|PC|MCP|MSP|USL|CSG|PH|OP|HB";
+var LBL_PRIMARY=/\b(?:project|development|subdivision|estate|parent(?:\s*site)?)\s*(?:address|location)\b/i;
+var LBL_STREET=/\bstreet\s*address\b/i;
+var LBL_SITE=/\b(?:site|property)\s*address\b|(?:site\s*location)\b/i;
+var LOT_PLAN_RX=new RegExp("\\bLOT(?:S)?\\s+(\\d{1,4}[A-Za-z]?)(?:\\s*(?:-|&|,|AND)\\s*(\\d{1,4}[A-Za-z]?))?\\s*(?:ON|OF|O\\/N|OF\\s+REGISTERED\\s+PLAN)?\\s*(?:PLAN|PLN)?\\s*("+PLAN_PREFIXES+")\\s*-?\\s*(\\d{3,7})(?=[^0-9]|$)","ig");
+var ALT_LOT_PLAN_RX=new RegExp("\\b(\\d{1,4}[A-Za-z]?)\\s+(?:ON|OF|O\\/N)?[\\s,;()A-Za-z0-9-]{0,25}?("+PLAN_PREFIXES+")\\s*-?\\s*(\\d{3,7})(?=[^0-9]|$)","ig");
+var PLAN_ONLY_RX=new RegExp("\\b("+PLAN_PREFIXES+")\\s*-?\\s*(\\d{3,7})\\b","ig");
+
+function stripAddressLabelPrefix(s){
+  if(!s) return '';
+  var prev;
+  do{
+    prev=s;
+    s=s.replace(LABEL_PREFIX_RX,'').trim();
+  }while(s!==prev);
+  return s;
+}
+
+function cleanAddressCandidate(s){
+  if(!s) return '';
+  return stripAddressLabelPrefix(s.replace(/\s+,/g,',').replace(/,+\s*/g,', ').replace(/\s+/g,' ').trim());
+}
+function evaluateAddressCandidate(raw){
+  var cleaned=cleanAddressCandidate(raw);
+  if(!cleaned) return {ok:false,score:-Infinity,text:''};
+  if(RPD_RX.test(cleaned) || JUNK.test(cleaned) || JUST_NUM.test(cleaned)) return {ok:false,score:-Infinity,text:''};
+  if(BOX_RX.test(cleaned) || CONTACT_RX.test(cleaned) || COMPANY_RX.test(cleaned) || /@/.test(cleaned)) return {ok:false,score:-Infinity,text:''};
+  var tokens=cleaned.split(/\s+/).filter(Boolean);
+  if(tokens.length<3 || tokens.length>22) return {ok:false,score:-Infinity,text:''};
+  var hasNumber=/\b\d{1,5}[A-Za-z]?\b/.test(cleaned);
+  var hasStreet=HAS_STREET.test(cleaned);
+  var hasState=STATES.test(cleaned);
+  var hasPC=POSTCODE.test(cleaned);
+  var commaParts=cleaned.split(',').filter(function(part){return part.trim().length>0;}).length;
+  var score=0;
+  score+=Math.min(2,tokens.length/4);
+  if(hasNumber) score+=1.25;
+  if(hasStreet) score+=4.5;
+  if(hasState) score+=2.5;
+  if(hasPC) score+=3.2;
+  if(hasStreet && hasPC) score+=1;
+  if(hasStreet && hasState) score+=0.8;
+  if(hasState && hasPC) score+=0.6;
+  if(commaParts>=2) score+=0.8;
+  if(tokens.length>10) score-=0.1*(tokens.length-10);
+  if(/\b(?:Heights|Estate|Park|Waters|Village|Cove|Bay|Creek|Hills|Gardens|Fields|Drive|Court)\b/i.test(cleaned)) score+=0.25;
+  if(score<1.2) return {ok:false,score:score,text:cleaned};
+  return {ok:true,score:score,text:cleaned};
+}
+function looksLikeAddress(s){
+  return evaluateAddressCandidate(s).ok;
+}
+function dropHeaderFooter(lines,pageHeight){
+  var top=pageHeight*0.08, bottom=pageHeight*0.92;
+  var out=[]; for(var i=0;i<lines.length;i++){var y=lines[i].y; if(y>top && y<bottom) out.push(lines[i]);}
+  return out.length?out:lines; // if coords weird, keep original
+}
+function harvestAfterLabel(lines,i){
+  var out=[], same=/\b(?:address|location)\b\s*[:\---]?\s*(.+)$/i.exec(lines[i].text);
+  if(same && !JUNK.test(same[1])) out.push(same[1].trim());
+  for(var k=1;k<=6 && i+k<lines.length;k++){
+    var t=lines[i+k].text; if(!t) continue;
+    if(LBL_PRIMARY.test(t)||LBL_STREET.test(t)||LBL_SITE.test(t)) break;
+    if(JUNK.test(t)) continue; out.push(t);
+    if(STATES.test(t) || POSTCODE.test(t)) break;
+  }
+  // validate
+  for(var c=0;c<out.length;c++){
+    var ev=evaluateAddressCandidate(out[c]);
+    if(ev.ok) return ev.text;
+  }
+  return '';
+}
+function parseEstateAddressStrict(pages){
+  var hits=[];
+  for(var p=0;p<pages.length;p++){
+    var lines=rebuildLines(pages[p].items,3);
+    lines = dropHeaderFooter(lines, pages[p].height||1);
+    for(var i=0;i<lines.length;i++){
+      var t=lines[i].text;
+      var isLabel = LBL_PRIMARY.test(t)||LBL_STREET.test(t)||LBL_SITE.test(t);
+      if(!isLabel) continue;
+      var v=harvestAfterLabel(lines,i);
+      var ev=evaluateAddressCandidate(v);
+      if(ev.ok) hits.push({t:ev.text,score:ev.score*10 + (100 - i)}); // prefer earlier match
+    }
+  }
+  hits.sort(function(a,b){return b.score-a.score});
+  return hits.length ? hits[0].t : null;
+}
+
+/* Pattern windows (13 lines) across each page, with hard validation */
+var INT_VAR_VAR_INT=/^\s*(\d{1,5}[A-Za-z]?)\s+([A-Za-z][A-Za-z0-9.'-]{2,})\s+([A-Za-z][A-Za-z0-9.'-]{2,})\s+(\d{4})\s*$/;
+var VAR_VAR_STATE_INT=/^\s*([A-Za-z][A-Za-z0-9.'-]{2,})\s+([A-Za-z][A-Za-z0-9.'-]{2,})\s+(QLD|NSW|VIC|SA|TAS|WA|NT|ACT)\s+(\d{4})\s*$/i;
+
+function scanAddressWindows(pages){
+  var best=null, bs=-Infinity;
+  for(var p=0;p<pages.length;p++){
+    var rawLines=rebuildLines(pages[p].items,3);
+    var lines=dropHeaderFooter(rawLines, pages[p].height||1);
+    for(var i=0;i<lines.length;i++){
+      for(var win=0; win<3 && i+win<lines.length; win++){
+        var joined = normalize(lines[i].text+' '+(win>=1?lines[i+1].text:'')+' '+(win>=2?lines[i+2].text:'')); 
+        if(!joined || RPD_RX.test(joined) || JUNK.test(joined)) continue;
+
+        // First try strict "looksLikeAddress"
+        var ev=evaluateAddressCandidate(joined);
+        if(ev.ok){
+          var score = ev.score*8 - win*0.5;
+          if(score>bs){bs=score;best=ev.text}
+          continue;
+        }
+        // Then try your fallbacks but only accept if they also look like address after validation
+        var m = INT_VAR_VAR_INT.exec(joined);
+        if(m){
+          var cand = m[1]+' '+m[2]+' '+m[3]+' '+m[4];
+          var ev1=evaluateAddressCandidate(cand);
+          if(ev1.ok){ var s1=ev1.score*6 - win*0.4; if(s1>bs){bs=s1;best=ev1.text} }
+          continue;
+        }
+        m = VAR_VAR_STATE_INT.exec(joined);
+        if(m){
+          var cand2 = m[1]+' '+m[2]+' '+m[3].toUpperCase()+' '+m[4];
+          var ev2=evaluateAddressCandidate(cand2);
+          if(ev2.ok){ var s2=ev2.score*5.5 - win*0.4; if(s2>bs){bs=s2;best=ev2.text} }
+        }
+      }
+    }
+  }
+  return best;
+}
+
+var INT_WORD_CHAIN_RX=/\b(\d{1,5}[A-Za-z]?)(?:\s+[A-Za-z][A-Za-z0-9&.'-]{2,}){2,6}\s+\d{4}\b/ig;
+var STREET_CHAIN_RX=/\b(\d{1,5}[A-Za-z]?)(?:\s+[A-Za-z][A-Za-z0-9&.'-]{2,}){1,6}\s+(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Close|Cl|Boulevard|Blvd|Highway|Hwy|Lane|Ln|Terrace|Terr|Way|Place|Pl|Crescent|Cres|Parade|Pde|Circuit|Circ|Rise|Path|Quay|Square|Sq|Gardens|Gdns|Esplanade|Track|Loop|Vista|Hill|View|Point|Pkwy|Parkway|Promenade|Prom|Motorway|Mwy)\b(?:\s+[A-Za-z][A-Za-z0-9&.'-]{2,}){0,5}(?:,\s*[A-Za-z][A-Za-z0-9&.'-]{2,}){0,3}(?:\s+(?:QLD|NSW|VIC|SA|TAS|WA|NT|ACT)\s+\d{4})?/ig;
+
+function structuredPatternCandidates(pages){
+  var cand=[];
+  for(var p=0;p<pages.length;p++){
+    var text=pages[p].text||'';
+    var m;
+    INT_WORD_CHAIN_RX.lastIndex=0;
+    while((m=INT_WORD_CHAIN_RX.exec(text))){
+      var snippet=m[0].trim();
+      var ev=evaluateAddressCandidate(snippet);
+      if(ev.ok){
+        var score=ev.score*8 + Math.max(0,20-p*1.2) - Math.min(5,m.index*0.002);
+        cand.push({t:ev.text,score:score});
+      }
+    }
+  }
+  return cand;
+}
+function streetChainsFromText(pages){
+  var cand=[], concat=pages.map(function(pg){return pg.text||'';}).join(' ');
+  var m;
+  STREET_CHAIN_RX.lastIndex=0;
+  while((m=STREET_CHAIN_RX.exec(concat))){
+    var snippet=m[0].trim();
+    var ev=evaluateAddressCandidate(snippet);
+    if(ev.ok){
+      var score=ev.score*7.5 + Math.max(0,18-m.index/1200);
+      cand.push({t:ev.text,score:score});
+    }
+  }
+  return cand;
+}
+function uniqueByText(arr){
+  var seen={}, out=[];
+  for(var i=0;i<arr.length;i++){
+    var key=(arr[i].t||'').toLowerCase();
+    if(!key || seen[key]) continue;
+    seen[key]=1;
+    out.push(arr[i]);
+  }
+  return out;
+}
+function extractAddressCandidates(pages){
+  var candidates=[];
+  var strict=parseEstateAddressStrict(pages);
+  if(strict){
+    var ev=evaluateAddressCandidate(strict);
+    if(ev.ok) candidates.push({t:ev.text,score:ev.score*12});
+  }
+  var windowHit=scanAddressWindows(pages);
+  if(windowHit){
+    var ev2=evaluateAddressCandidate(windowHit);
+    if(ev2.ok) candidates.push({t:ev2.text,score:ev2.score*10});
+  }
+  candidates=candidates.concat(structuredPatternCandidates(pages));
+  candidates=candidates.concat(streetChainsFromText(pages));
+  candidates=uniqueByText(candidates);
+  candidates.sort(function(a,b){return b.score-a.score});
+  return candidates;
+}
+
+function parseLotPlanFromText(text){
+  if(!text) return null;
+  LOT_PLAN_RX.lastIndex=0;
+  var m;
+  while((m=LOT_PLAN_RX.exec(text))){
+    var lot=(m[1]||'').toUpperCase();
+    var prefix=(m[3]||'').replace(/\s+/g,'').toUpperCase();
+    var number=(m[4]||'').replace(/\D+/g,'');
+    if(lot && prefix && number){
+      return {lot:lot,plan:prefix+number};
+    }
+  }
+  ALT_LOT_PLAN_RX.lastIndex=0;
+  while((m=ALT_LOT_PLAN_RX.exec(text))){
+    var lot2=(m[1]||'').toUpperCase();
+    var prefix2=(m[2]||'').replace(/\s+/g,'').toUpperCase();
+    var number2=(m[3]||'').replace(/\D+/g,'');
+    if(lot2 && prefix2 && number2){
+      return {lot:lot2,plan:prefix2+number2};
+    }
+  }
+  PLAN_ONLY_RX.lastIndex=0;
+  while((m=PLAN_ONLY_RX.exec(text))){
+    var prefix3=(m[1]||'').replace(/\s+/g,'').toUpperCase();
+    var number3=(m[2]||'').replace(/\D+/g,'');
+    if(!prefix3||!number3) continue;
+    var start=Math.max(0,m.index-80);
+    var snippet=text.slice(start,m.index);
+    var lotMatch=snippet.match(/(?:LOT\s+)?(\d{1,4}[A-Za-z]?)(?=[^0-9A-Za-z]*$)/i);
+    if(lotMatch){
+      var lot3=lotMatch[1].toUpperCase();
+      if(lot3) return {lot:lot3,plan:prefix3+number3};
+    }
+  }
+  return null;
+}
+function parseLotPlanString(str){
+  return parseLotPlanFromText((str||'').toUpperCase());
+}
+function parseLotPlanFromPages(pages){
+  for(var i=0;i<pages.length;i++){
+    var lp=parseLotPlanFromText(pages[i].text);
+    if(lp) return lp;
+  }
+  return null;
+}
+function initLotPlanLookupLayers(){
+  if(lotPlanLookupReady) return lotPlanLookupReady;
+  var loaders=(LOT_PLAN_LAYER_URLS||[]).map(function(url){
+    if(!url) return Promise.resolve(null);
+    try{
+      var layer=new FeatureLayer({url:url,outFields:['*'],popupEnabled:false,visible:false});
+      return layer.load().then(function(){
+        var fields=layer.fields||[];
+        var lotField=detectLotField(fields);
+        var planField=detectPlanField(fields);
+        var comboField=detectLotPlanField(fields);
+        if(!lotField && !comboField){
+          console.warn('Lot/plan layer missing usable fields',url);
+          return null;
+        }
+        return {layer:layer,lotField:lotField,planField:planField,comboField:comboField};
+      }).catch(function(err){
+        console.warn('Lot/plan lookup layer failed',url,err);
+        return null;
+      });
+    }catch(loadErr){
+      console.warn('Lot/plan layer init error',url,loadErr);
+      return Promise.resolve(null);
+    }
+  });
+  lotPlanLookupReady=Promise.all(loaders).then(function(entries){
+    return entries.filter(function(entry){return entry && entry.layer;});
+  });
+  return lotPlanLookupReady;
+}
+initLotPlanLookupLayers();
+function detectLotField(fields){
+  return findFieldByPriority(fields,['LOT','LOT_NO','LOTNUM','LOTNUMBER','LOT_NUMBER','LOT_ID','LOTID','LOT_LABEL']) ||
+    findFieldContaining(fields,'LOT','PLAN');
+}
+function detectPlanField(fields){
+  return findFieldByPriority(fields,['PLAN','PLAN_NO','PLANNUMBER','PLAN_NUMBER','PLANID','PLAN_LABEL','PLAN_NO_TXT']) ||
+    findFieldContaining(fields,'PLAN','LOT');
+}
+function detectLotPlanField(fields){
+  return findFieldByPriority(fields,['LOT_PLAN','LOTPLAN','LOTPLAN_NO','LOTPLANNO','LOTPLAN_TXT','LOTPLANLABEL','LOTPLANID']) ||
+    findFieldWithTokens(fields,['LOT','PLAN']);
+}
+function findFieldByPriority(fields,names){
+  if(!fields||!fields.length||!names||!names.length) return null;
+  var upperNames=names.map(function(n){return (n||'').toUpperCase();});
+  for(var i=0;i<upperNames.length;i++){
+    var target=upperNames[i];
+    for(var j=0;j<fields.length;j++){
+      var f=fields[j];
+      if((f.name||'').toUpperCase()===target) return f.name;
+    }
+  }
+  return null;
+}
+function findFieldContaining(fields,includeToken,excludeToken){
+  if(!fields||!fields.length) return null;
+  var inc=(includeToken||'').toUpperCase();
+  var exc=(excludeToken||'').toUpperCase();
+  for(var i=0;i<fields.length;i++){
+    var name=(fields[i].name||'').toUpperCase();
+    if(inc && name.indexOf(inc)===-1) continue;
+    if(exc && exc.length && name.indexOf(exc)!==-1) continue;
+    return fields[i].name;
+  }
+  return null;
+}
+function findFieldWithTokens(fields,tokens){
+  if(!fields||!fields.length||!tokens||!tokens.length) return null;
+  var ups=tokens.map(function(tok){return (tok||'').toUpperCase();});
+  for(var i=0;i<fields.length;i++){
+    var upper=(fields[i].name||'').toUpperCase();
+    var ok=true;
+    for(var k=0;k<ups.length;k++){
+      if(ups[k] && upper.indexOf(ups[k])===-1){ok=false;break;}
+    }
+    if(ok) return fields[i].name;
+  }
+  return null;
+}
+function normalizeLotPlanToken(value){
+  return (value||'').toString().toUpperCase().replace(/[^0-9A-Z]+/g,'');
+}
+function variantsForLot(value){
+  var variants=[];
+  var tight=normalizeLotPlanToken(value);
+  var spaced=(value||'').toString().toUpperCase().replace(/\s+/g,' ').trim();
+  if(tight) variants.push(tight);
+  if(spaced && variants.indexOf(spaced)===-1) variants.push(spaced);
+  if(tight){
+    var lotLabel='LOT '+tight;
+    if(variants.indexOf(lotLabel)===-1) variants.push(lotLabel);
+  }
+  if(spaced && spaced.indexOf('LOT ')!==0){
+    var pref='LOT '+spaced;
+    if(variants.indexOf(pref)===-1) variants.push(pref);
+  }
+  return variants;
+}
+function variantsForPlan(value){
+  var variants=[];
+  var tight=normalizeLotPlanToken(value);
+  var spaced=(value||'').toString().toUpperCase().replace(/\s+/g,' ').trim();
+  if(tight) variants.push(tight);
+  if(spaced && variants.indexOf(spaced)===-1) variants.push(spaced);
+  return variants;
+}
+function lotPlanCombinedVariants(lotVariants,planVariants){
+  var combos=[];
+  for(var i=0;i<(lotVariants||[]).length;i++){
+    for(var j=0;j<(planVariants||[]).length;j++){
+      var lv=lotVariants[i];
+      var pv=planVariants[j];
+      var base=(lv+' '+pv).trim();
+      pushUnique(combos,base);
+      pushUnique(combos,'LOT '+base);
+      pushUnique(combos,lv+'/'+pv);
+      pushUnique(combos,lv+'-'+pv);
+      pushUnique(combos,lv+pv);
+      pushUnique(combos,'LOT'+lv+pv);
+      var compact=base.replace(/\s+/g,'');
+      if(compact) pushUnique(combos,compact);
+    }
+  }
+  return combos;
+}
+function pushUnique(arr,val){
+  if(!arr || !val) return;
+  if(arr.indexOf(val)===-1) arr.push(val);
+}
+function escapeSqlLiteral(str){
+  return (str||'').replace(/'/g,"''");
+}
+function centerFromRing(ring){
+  if(!ring||!ring.length) return null;
+  var sumLon=0,sumLat=0;
+  for(var i=0;i<ring.length;i++){
+    sumLon+=ring[i][0];
+    sumLat+=ring[i][1];
+  }
+  return {lat:sumLat/ring.length,lon:sumLon/ring.length};
+}
+function normalizeRingCoords(coords){
+  var ring=[];
+  for(var i=0;i<(coords||[]).length;i++){
+    var pair=coords[i];
+    if(!pair || pair.length<2) continue;
+    var lon=+pair[0], lat=+pair[1];
+    if(!isFinite(lon)||!isFinite(lat)) continue;
+    ring.push([lon,lat]);
+  }
+  if(ring.length>=2){
+    var first=ring[0], last=ring[ring.length-1];
+    if(first[0]!==last[0] || first[1]!==last[1]){
+      ring.push([first[0],first[1]]);
+    }
+  }
+  return ring;
+}
+function geometryToRings(geometry){
+  if(!geometry || !geometry.type) return null;
+  var type=geometry.type.toLowerCase();
+  if(type==='polygon'){
+    return (geometry.coordinates||[]).map(normalizeRingCoords).filter(function(r){return r.length>=4;});
+  }
+  if(type==='multipolygon'){
+    var rings=[];
+    (geometry.coordinates||[]).forEach(function(poly){
+      (poly||[]).forEach(function(ringCoords){
+        var ring=normalizeRingCoords(ringCoords);
+        if(ring.length>=4) rings.push(ring);
+      });
+    });
+    return rings;
+  }
+  return null;
+}
+function fetchLotPlanGeometryFromBCC(lotPlan){
+  if(!lotPlan||!lotPlan.lot||!lotPlan.plan||!BCC_PARCEL_API) return Promise.resolve(null);
+  var lot=escapeSqlLiteral((lotPlan.lot||'').toString().trim().toUpperCase());
+  var plan=escapeSqlLiteral((lotPlan.plan||'').toString().trim().toUpperCase());
+  if(!lot||!plan) return Promise.resolve(null);
+  var where="lot='"+lot+"' AND plan='"+plan+"'";
+  var url=BCC_PARCEL_API+'?limit=1&where='+encodeURIComponent(where);
+  return fetch(url).then(function(res){
+    if(!res.ok) throw new Error('BCC parcel request failed');
+    return res.json();
+  }).then(function(json){
+    if(!json||!json.results||!json.results.length) return null;
+    var rec=json.results[0];
+    var geom=rec && rec.geo_shape && rec.geo_shape.geometry;
+    var rings=geometryToRings(geom);
+    if(!rings || !rings.length) return null;
+    var center=null;
+    if(rec.geo_point_2d && isFinite(rec.geo_point_2d.lat) && isFinite(rec.geo_point_2d.lon)){
+      center={lat:+rec.geo_point_2d.lat,lon:+rec.geo_point_2d.lon};
+    }else{
+      center=centerFromRing(rings[0]);
+    }
+    return {rings:rings,center:center,source:'bcc'};
+  }).catch(function(err){
+    console.warn('BCC parcel lookup failed',err);
+    return null;
+  });
+}
+function queryLotPlanEntry(entry,lotVariants,planVariants){
+  if(!entry||!entry.layer) return Promise.resolve(null);
+  var clauses=[];
+  var lots=lotVariants||[];
+  var plans=planVariants||[];
+  if(entry.lotField && entry.planField){
+    for(var i=0;i<lots.length;i++){
+      for(var j=0;j<plans.length;j++){
+        var lotVal=escapeSqlLiteral(lots[i]);
+        var planVal=escapeSqlLiteral(plans[j]);
+        clauses.push("UPPER("+entry.lotField+")='"+lotVal+"' AND UPPER("+entry.planField+")='"+planVal+"'");
+      }
+    }
+  }
+  if(entry.comboField){
+    var combos=lotPlanCombinedVariants(lots,plans);
+    for(var c=0;c<combos.length;c++){
+      var comboVal=escapeSqlLiteral(combos[c]);
+      clauses.push("UPPER("+entry.comboField+")='"+comboVal+"'");
+      var compact=combos[c].replace(/\s+/g,'');
+      if(compact && compact!==combos[c]){
+        clauses.push("REPLACE(UPPER("+entry.comboField+"),' ','')='"+escapeSqlLiteral(compact)+"'");
+      }
+    }
+  }
+  if(!clauses.length) return Promise.resolve(null);
+  var where=clauses.length===1?clauses[0]:clauses.map(function(cl){return '('+cl+')';}).join(' OR ');
+  return entry.layer.queryFeatures({
+    where:where,
+    outFields:['*'],
+    returnGeometry:true,
+    num:1,
+    outSpatialReference:{wkid:4326}
+  }).then(function(res){
+    if(res && res.features && res.features.length){
+      var geom=res.features[0].geometry;
+      if(geom && geom.rings && geom.rings.length){
+        var center=null;
+        if(geom.centroid && isFinite(geom.centroid.y) && isFinite(geom.centroid.x)){
+          center={lat:geom.centroid.y,lon:geom.centroid.x};
+        }else if(geom.extent && geom.extent.center){
+          var ctr=geom.extent.center;
+          center={lat:ctr.y||ctr.latitude||0,lon:ctr.x||ctr.longitude||0};
+        }else{
+          center=centerFromRing(geom.rings[0]);
+        }
+        return {rings:geom.rings,center:center};
+      }
+    }
+    return null;
+  }).catch(function(err){
+    console.warn('Lot/plan query error for',entry.layer.url,err);
+    return null;
+  });
+}
+function legacyLotPlanGeometryFetch(lotPlan){
+  var where="LOT='"+lotPlan.lot+"' AND PLAN='"+lotPlan.plan+"'";
+  var url=DCDB_FEATURE_URL+"/query?where="+encodeURIComponent(where)+"&outFields=LOT,PLAN&returnGeometry=true&f=json&outSR=4326";
+  return fetch(url).then(function(res){
+    if(!res.ok) throw new Error('Lot/plan request failed');
+    return res.json();
+  }).then(function(json){
+    if(json&&json.features&&json.features.length){
+      var geom=json.features[0].geometry;
+      if(geom && geom.rings && geom.rings.length){
+        var center=null;
+        if(geom.centroid && isFinite(geom.centroid.y)&&isFinite(geom.centroid.x)){
+          center={lat:geom.centroid.y,lon:geom.centroid.x};
+        }else{
+          center=centerFromRing(geom.rings[0]);
+        }
+        return {rings:geom.rings,center:center};
+      }
+    }
+    return null;
+  }).catch(function(err){
+    console.warn('Lot/plan geometry fetch failed',err);
+    return null;
+  });
+}
+function fetchLotPlanGeometry(lotPlan){
+  if(!lotPlan||!lotPlan.lot||!lotPlan.plan) return Promise.resolve(null);
+  return fetchLotPlanGeometryFromBCC(lotPlan).then(function(bccResult){
+    if(bccResult) return bccResult;
+    var lotVariants=variantsForLot(lotPlan.lot);
+    var planVariants=variantsForPlan(lotPlan.plan);
+    return initLotPlanLookupLayers().then(function(entries){
+      function tryNext(idx){
+        if(!entries || idx>=entries.length) return Promise.resolve(null);
+        return queryLotPlanEntry(entries[idx],lotVariants,planVariants).then(function(result){
+          if(result) return result;
+          return tryNext(idx+1);
+        });
+      }
+      return tryNext(0);
+    }).then(function(found){
+      if(found) return found;
+      return legacyLotPlanGeometryFetch(lotPlan);
+    });
+  }).catch(function(err){
+    console.warn('Lot/plan lookup failed',err);
+    return null;
+  });
+}
+function manualLotPlanLookup(raw){
+  raw=(raw||'').trim();
+  if(!raw){
+    setLotPlanStatus('Enter a lot/plan (e.g. Lot 19 RP90746).',true);
+    return Promise.resolve(null);
+  }
+  var parsed=parseLotPlanString(raw);
+  if(!parsed){
+    setLotPlanStatus('Format not recognised. Try "Lot 19 RP90746".',true);
+    return Promise.resolve(null);
+  }
+  setLotPlanStatus('Searching for Lot '+parsed.lot+' on '+parsed.plan+'...',false);
+  return fetchLotPlanGeometry(parsed).then(function(shape){
+    if(shape && shape.rings){
+      currentPodState.lotPlan=parsed;
+      currentPodState.lotPlanGeom=shape;
+      showPodOutlineFromRings(shape.rings);
+      if(shape.center && inAU(shape.center.lat,shape.center.lon)){
+        placeFromForm(shape.center.lat,shape.center.lon,{zoom:true});
+      }
+      setLotPlanStatus('Lot '+parsed.lot+' on '+parsed.plan+' located.',false);
+      return shape;
+    }
+    setLotPlanStatus('Parcel not found in available parcel datasets.',true);
+    return null;
+  }).catch(function(err){
+    console.error('Manual lot plan lookup failed',err);
+    setLotPlanStatus('Lookup failed. Check lot/plan format or try later.',true);
+    return null;
+  });
+}
+
+/* Lat/Lon from text (optional) */
+function dmsToDec(d,m,s,h){var v=Math.abs(d)+(m||0)/60+(s||0)/3600; if(/[SW]/i.test(h)) v=-v; return v}
+function parseLatLon(text){
+  var out=[], m, rx=/(\d{1,2})[]\s*(\d{1,2})['']\s*(\d{1,2}(?:\.\d+)?)["?]?\s*([NS])[^0-9]+(\d{1,3})[]\s*(\d{1,2})['']\s*(\d{1,2}(?:\.\d+)?)["?]?\s*([EW])/ig;
+  while((m=rx.exec(text))){var lat=dmsToDec(+m[1],+m[2],+m[3],m[4]), lon=dmsToDec(+m[5],+m[6],+m[7],m[8]); if(inAU(lat,lon)) out.push({lat:lat,lon:lon,score:3})}
+  out.sort(function(a,b){return b.score-a.score}); return out;
+}
+
+/* ===== Plan dims (simple & robust) ===== */
+function planDims(pages){
+  var rx=/(\d+(?:\.\d+)?)\s*(m|mm)?\s*(?:x|by|-||)\s*(\d+(?:\.\d+)?)\s*(m|mm)?/ig, hits=[];
+  for(var p=0;p<pages.length;p++){var text=pages[p].text, m; while((m=rx.exec(text))){var a=+m[1],b=+m[3],ua=(m[2]||'m').toLowerCase(),ub=(m[4]||'m').toLowerCase();var w=ua==='mm'?a/1000:a,l=ub==='mm'?b/1000:b;if(w>=0.5&&l>=0.5&&w<=150&&l<=150) hits.push({w:w,l:l,src:'p.'+pages[p].index+': '+m[0]})}}
+  hits.sort(function(A,B){return (B.w*B.l)-(A.w*A.l)}); return hits[0]||null;
+}
+
+/* ===== PoD flow ===== */
+var lotSelect=document.getElementById('lotSelect'), placeOnLotBtn=document.getElementById('placeOnLot'), clearLotsBtn=document.getElementById('clearLots');
+function showPodSummary(addr,coordCount,lotCount,lotPlan){
+  var el=document.getElementById('podMsg'); if(!el) return;
+  var lotPlanHtml = lotPlan ? '  <b>Lot/Plan:</b> '+lotPlan.lot+' on '+lotPlan.plan : '';
+  el.innerHTML='<b>Estate:</b> '+(addr||'<i>not found</i>')+'  <b>Coords:</b> '+coordCount+'  <b>Lots:</b> '+lotCount+lotPlanHtml;
+}
+
+function parsePoD(u8){
+  return pdfPages(u8).then(function(pages){
+    var candidates=extractAddressCandidates(pages);
+    var addr=candidates.length?candidates[0].t:null;
+
+    var allText=' '+pages.map(function(p){return p.text}).join(' ')+' ';
+    var coords=parseLatLon(allText);
+    if(coords.length<3){
+      var mgaCoords=parseMGAFromPages(pages);
+      if(mgaCoords.length>=3){
+        coords=mgaCoords;
+      }
+    }
+    var center=coords.length?centerFromLatLon(coords):null;
+    var lotPlan=parseLotPlanFromPages(pages) || parseLotPlanFromText(allText);
+
+    var lots=[];
+    var seenLots={};
+    var lotRx=/\b(?:PROPOSED\s+)?LOT\s+(\d{1,4}[A-Za-z]?)\b/ig;
+    var rangeRx=/\b(?:PROPOSED\s+)?LOTS?\s+(\d{1,4})\s*(?:-||to)\s*(\d{1,4})\b/ig;
+    for(var p=0;p<pages.length;p++){
+      var text=pages[p].text||'';
+      var m;
+      lotRx.lastIndex=0;
+      while((m=lotRx.exec(text))){
+        var id=m[1].toUpperCase();
+        if(!seenLots[id]){seenLots[id]=true; lots.push({id:id});}
+      }
+      rangeRx.lastIndex=0;
+      while((m=rangeRx.exec(text))){
+        var start=parseInt(m[1],10), end=parseInt(m[2],10);
+        if(isFinite(start)&&isFinite(end) && start<=end && end-start<=400){
+          for(var k=start;k<=end;k++){
+            var rid=String(k);
+            if(!seenLots[rid]){seenLots[rid]=true; lots.push({id:rid});}
+          }
+        }
+      }
+    }
+
+    function ocrIfNeeded(){
+      if(addr || !window.Tesseract) return Promise.resolve({addr:addr,center:center,lots:lots,coords:coords,lotPlan:lotPlan});
+      return window.pdfjsLib.getDocument({data:u8}).promise.then(async function(doc){
+        for(var i=1;i<=doc.numPages;i++){
+          var p=await doc.getPage(i), vp=p.getViewport({scale:2.1});
+          var canvas=document.createElement('canvas'); canvas.width=vp.width|0; canvas.height=vp.height|0;
+          var ctx=canvas.getContext('2d',{willReadFrequently:true}); await p.render({canvasContext:ctx,viewport:vp}).promise;
+          var res=await Tesseract.recognize(canvas,'eng'); var text=normalize((res&&res.data&&res.data.text)||'');
+          if(text){
+            var tmp=[{index:1000+i,items:[],text:text,width:vp.width,height:vp.height}];
+            var more=extractAddressCandidates(tmp);
+            if(more.length){addr=more[0].t;}
+            if(!lotPlan){lotPlan=parseLotPlanFromText(text);}
+            if(addr) break;
+          }
+        }
+        return {addr:addr,center:center,lots:lots,coords:coords,lotPlan:lotPlan};
+      });
+    }
+    return ocrIfNeeded().then(function(res){
+      res=res||{};
+      if(!res.coords) res.coords=coords;
+      if(!res.lotPlan && lotPlan) res.lotPlan=lotPlan;
+      return res;
+    });
+  });
+}
+
+function maybeHydrateLotPlanGeometry(res){
+  if(!res) return Promise.resolve(res);
+  if(res.coords && res.coords.length>=3) return Promise.resolve(res);
+  if(!res.lotPlan) return Promise.resolve(res);
+  return fetchLotPlanGeometry(res.lotPlan).then(function(shape){
+    if(shape){
+      res.lotPlanGeom=shape;
+      if(!res.center && shape.center && inAU(shape.center.lat,shape.center.lon)){
+        res.center=shape.center;
+      }
+    }
+    return res;
+  }).catch(function(){return res;});
+}
+/* ===== UI handlers ===== */
+var applyBtn=document.getElementById('applySize'); if(applyBtn){applyBtn.addEventListener('click',function(){var p=getInputs();placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true})})}
+var resetBtn=document.getElementById('resetView'); if(resetBtn){resetBtn.addEventListener('click',function(){var p=getInputs();goToFootprint(lastLatLon.lat,lastLatLon.lon,p.w,p.l).then(function(){return alignCameraNorth();});})}
+var yawEl=document.getElementById('yaw'); if(yawEl){yawEl.addEventListener('input',function(){if(!buildingGraphic)return;var p=getInputs();placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:false})})}
+var eastEl=document.getElementById('offsetEast'); if(eastEl){eastEl.addEventListener('input',function(){if(!buildingGraphic)return;var p=getInputs();placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:false})})}
+var northEl=document.getElementById('offsetNorth'); if(northEl){northEl.addEventListener('input',function(){if(!buildingGraphic)return;var p=getInputs();placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:false})})}
+if(lotPlanBtn){lotPlanBtn.addEventListener('click',function(){if(!lotPlanInput) return; manualLotPlanLookup(lotPlanInput.value);});}
+if(lotPlanInput){lotPlanInput.addEventListener('keydown',function(ev){if(ev.key==='Enter'){ev.preventDefault(); manualLotPlanLookup(lotPlanInput.value);}});}
+
+var planEl=document.getElementById('planPdf');
+if(planEl){planEl.addEventListener('change',function(e){
+  var f=e.target.files&&e.target.files[0]; if(!f) return;
+  var reader=new FileReader();
+  reader.onload=function(){
+    var u8=new Uint8Array(reader.result);
+    window.pdfjsLib.getDocument({data:u8}).promise.then(function(){return pdfPages(u8)}).then(function(pages){
+      var d=planDims(pages);
+      if(d){document.getElementById('wMeter').value=d.w.toFixed(2); document.getElementById('lMeter').value=d.l.toFixed(2); document.getElementById('pdfMsg').innerHTML=d.w.toFixed(2)+'  '+d.l.toFixed(2)+' m <span class="muted">('+d.src+')</span>'}
+      var p=getInputs(); return placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true});
+    }).catch(function(err){alert('Plan PDF parse failed: '+(err&&err.message||err))});
+  };
+  reader.readAsArrayBuffer(f);
+})}
+
+var podEl=document.getElementById('podPdf');
+if(podEl){
+  podEl.addEventListener('change',function(e){
+    var input=e.target;
+    var file=input.files&&input.files[0];
+    if(!file){
+      setPodStatus('No PoD selected.',false);
+      return;
+    }
+    var name=(file.name||'PoD').trim();
+    if(!/\.pdf$/i.test(name)){
+      setPodStatus('That file must be a .pdf ('+name+').',true);
+      input.value='';
+      return;
+    }
+    if(!window.pdfjsLib || !window.pdfjsLib.getDocument){
+      setPodStatus('PDF engine not ready. Refresh the page and try again.',true);
+      input.value='';
+      return;
+    }
+    setPodStatus('Reading '+name+'...',false);
+    var reader=new FileReader();
+    var statusToken=null;
+    reader.onload=function(){
+      statusToken=showStatus('Parsing PoD...');
+      var u8=new Uint8Array(reader.result);
+      Promise.resolve()
+        .then(function(){return window.pdfjsLib.getDocument({data:u8}).promise;})
+        .then(function(){return parsePoD(u8);})
+        .then(maybeHydrateLotPlanGeometry)
+        .then(function(res){
+          if(statusToken!==null) hideStatus(statusToken);
+          res=res||{};
+          var addr=res.addr||null;
+          var lots=res.lots||[];
+          var coords=res.coords||[];
+          var lotPlan=res.lotPlan||null;
+          var outlineCenter=null;
+          if(coords.length>=3){
+            outlineCenter=showPodOutlineFromCoords(coords);
+          }else if(res.lotPlanGeom && res.lotPlanGeom.rings){
+            outlineCenter=showPodOutlineFromRings(res.lotPlanGeom.rings);
+          }else{
+            clearPodOutline();
+          }
+          var autoTarget=null;
+          if(res.center && inAU(res.center.lat,res.center.lon)){autoTarget=res.center;}
+          else if(outlineCenter && inAU(outlineCenter.lat,outlineCenter.lon)){autoTarget=outlineCenter;}
+          if(addr){
+            var aEl=document.getElementById('addr');
+            if(aEl) aEl.value=addr;
+          }
+          currentPodState.addr=addr;
+          currentPodState.coords=coords;
+          currentPodState.lots=lots;
+          currentPodState.lotPlan=lotPlan;
+          currentPodState.lotPlanGeom=res.lotPlanGeom||null;
+          if(autoTarget){
+            placeFromForm(autoTarget.lat,autoTarget.lon,{zoom:true});
+          }else if(addr){
+            centerOnAddress(addr);
+          }
+          var sel=lotSelect;
+          sel.innerHTML='<option value="">- Select lot -</option>';
+          for(var i=0;i<Math.min(lots.length,60);i++){
+            var o=document.createElement('option');
+            o.value=lots[i].id;
+            o.textContent='Lot '+lots[i].id;
+            sel.appendChild(o);
+          }
+          placeOnLotBtn.disabled = lots.length===0;
+          clearLotsBtn.disabled = lots.length===0;
+          showPodSummary(addr, coords.length, lots.length, lotPlan);
+          var summaryParts=[];
+          if(addr) summaryParts.push(addr);
+          if(lotPlan && lotPlan.lot && lotPlan.plan) summaryParts.push('Lot '+lotPlan.lot+' '+lotPlan.plan);
+          setPodStatus('PoD loaded'+(summaryParts.length?': '+summaryParts.join(' | '):''),false);
+          input.value='';
+        })
+        .catch(function(err){
+          if(statusToken!==null) hideStatus(statusToken);
+          var msg=(err&&err.message)||err||'Unknown error';
+          console.error('PoD parse failed',err);
+          setPodStatus('PoD parse failed: '+msg,true);
+          alert('PoD parse failed: '+msg);
+          input.value='';
+        });
+    };
+    reader.onerror=function(){
+      if(statusToken!==null) hideStatus(statusToken);
+      setPodStatus('Could not read that PDF.',true);
+      input.value='';
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+var placeOnLotBtn=document.getElementById('placeOnLot'), clearLotsBtn=document.getElementById('clearLots');
+if(placeOnLotBtn){placeOnLotBtn.addEventListener('click',function(){
+  var id=lotSelect.value; if(!id){alert('Select a lot'); return;}
+  var p=getInputs(); placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true});
+})}
+if(clearLotsBtn){clearLotsBtn.addEventListener('click',function(){
+  lotSelect.innerHTML='<option value=""> Select lot </option>';
+  placeOnLotBtn.disabled=true; clearLotsBtn.disabled=true;
+})}
+if(lotGuessBtn){lotGuessBtn.addEventListener('click',guessLotsFromOutline);}
+if(lotDrawStart){lotDrawStart.addEventListener('click',beginManualLot);}
+if(lotDrawUndo){lotDrawUndo.addEventListener('click',undoManualLotPoint);}
+if(lotDrawFinish){lotDrawFinish.addEventListener('click',finishManualLot);}
+if(lotDrawCancel){lotDrawCancel.addEventListener('click',cancelManualLot);}
+if(lotDrawClear){lotDrawClear.addEventListener('click',clearManualLots);}
+if(lotDrawExport){lotDrawExport.addEventListener('click',exportManualLots);}
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

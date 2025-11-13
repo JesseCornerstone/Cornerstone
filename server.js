@@ -7,12 +7,12 @@ const sql = require('mssql');
 
 const app = express();
 
-// ----- health check -----
+// ---------- Health check ----------
 app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// ----- DB config (Azure SQL) -----
+// ---------- DB config (matches your Azure SQL) ----------
 const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -28,16 +28,15 @@ const dbConfig = {
 const poolPromise = sql.connect(dbConfig);
 
 poolPromise
-  .then(() => {
-    console.log('✅ Connected to SQL database');
-  })
+  .then(() => console.log('✅ Connected to SQL database'))
   .catch(err => {
     console.error('❌ Failed to connect to SQL database', err);
-    // DO NOT throw here – we want the app to keep running
+    // don't throw here – app should still run so we can see errors in responses
   });
 
-// ----- middleware -----
+// ---------- Middleware ----------
 app.use(express.json());
+
 app.use(session({
   name: 'cs_sess',
   secret: process.env.SESSION_SECRET || 'change-me-in-prod',
@@ -46,23 +45,25 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: false   // set to true if you're on HTTPS + custom domain
+    secure: false // set true if HTTPS + custom domain only
   }
 }));
 
-const userFromRow = row => row && ({
-  id: row.id,
-  first_name: row.first_name,
-  last_name: row.last_name,
-  email: row.email,
-  company: row.company,
-  role: row.role,
-  created_at: row.created_at
-});
+// Map DB row (Id, FirstName, ...) to JSON user object used by Account.html
+function userFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.Id,
+    first_name: row.FirstName,
+    last_name: row.LastName,
+    email: row.Email,
+    company: row.Company,
+    role: row.Role,
+    created_at: row.CreatedAt
+  };
+}
 
-// ----- API routes -----
-
-// current user
+// ---------- API: current user ----------
 app.get('/api/me', async (req, res) => {
   try {
     if (!req.session.userId) {
@@ -75,17 +76,29 @@ app.get('/api/me', async (req, res) => {
     }
 
     const result = await pool.request()
-      .input('id', sql.Int, req.session.userId)
-      .query('SELECT TOP 1 id, first_name, last_name, email, company, role, created_at FROM users WHERE id = @id');
+      .input('Id', sql.Int, req.session.userId)
+      .query(`
+        SELECT TOP 1
+          Id,
+          FirstName,
+          LastName,
+          Email,
+          Company,
+          Role,
+          CreatedAt
+        FROM [dbo].[Users]
+        WHERE Id = @Id
+      `);
 
-    return res.json({ user: userFromRow(result.recordset[0]) });
+    const user = userFromRow(result.recordset[0]);
+    return res.json({ user });
   } catch (err) {
     console.error('GET /api/me error', err);
-    return res.status(500).json({ user: null });
+    return res.status(500).json({ user: null, error: 'Server error' });
   }
 });
 
-// register
+// ---------- API: register ----------
 app.post('/api/auth/register', async (req, res) => {
   const { first_name, last_name, email, company, role, password } = req.body || {};
 
@@ -99,10 +112,10 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(500).json({ ok: false, error: 'No DB connection' });
     }
 
-    // check existing email
+    // Check if email already exists
     const existing = await pool.request()
-      .input('email', sql.NVarChar, email)
-      .query('SELECT 1 FROM users WHERE email = @email');
+      .input('Email', sql.NVarChar, email)
+      .query('SELECT 1 FROM [dbo].[Users] WHERE Email = @Email');
 
     if (existing.recordset.length) {
       return res.status(400).json({ ok: false, error: 'Email already registered' });
@@ -111,17 +124,37 @@ app.post('/api/auth/register', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
 
     const insert = await pool.request()
-      .input('first_name', sql.NVarChar, first_name)
-      .input('last_name', sql.NVarChar, last_name)
-      .input('email', sql.NVarChar, email)
-      .input('company', sql.NVarChar, company || null)
-      .input('role', sql.NVarChar, role || null)
-      .input('password_hash', sql.NVarChar, hash)
+      .input('FirstName', sql.NVarChar, first_name)
+      .input('LastName', sql.NVarChar, last_name)
+      .input('Email', sql.NVarChar, email)
+      .input('Company', sql.NVarChar, company || null)
+      .input('Role', sql.NVarChar, role || null)
+      .input('PasswordHash', sql.NVarChar, hash)
       .query(`
-        INSERT INTO users (first_name, last_name, email, company, role, password_hash)
-        OUTPUT INSERTED.id, INSERTED.first_name, INSERTED.last_name, INSERTED.email,
-               INSERTED.company, INSERTED.role, INSERTED.created_at
-        VALUES (@first_name, @last_name, @email, @company, @role, @password_hash)
+        INSERT INTO [dbo].[Users] (
+          FirstName,
+          LastName,
+          Email,
+          Company,
+          Role,
+          PasswordHash
+        )
+        OUTPUT
+          INSERTED.Id,
+          INSERTED.FirstName,
+          INSERTED.LastName,
+          INSERTED.Email,
+          INSERTED.Company,
+          INSERTED.Role,
+          INSERTED.CreatedAt
+        VALUES (
+          @FirstName,
+          @LastName,
+          @Email,
+          @Company,
+          @Role,
+          @PasswordHash
+        )
       `);
 
     const user = userFromRow(insert.recordset[0]);
@@ -133,7 +166,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// login
+// ---------- API: login ----------
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
 
@@ -148,15 +181,27 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const result = await pool.request()
-      .input('email', sql.NVarChar, email)
-      .query('SELECT TOP 1 id, first_name, last_name, email, company, role, created_at, password_hash FROM users WHERE email = @email');
+      .input('Email', sql.NVarChar, email)
+      .query(`
+        SELECT TOP 1
+          Id,
+          FirstName,
+          LastName,
+          Email,
+          Company,
+          Role,
+          PasswordHash,
+          CreatedAt
+        FROM [dbo].[Users]
+        WHERE Email = @Email
+      `);
 
     if (!result.recordset.length) {
       return res.status(401).json({ ok: false, error: 'Invalid email or password' });
     }
 
     const row = result.recordset[0];
-    const match = await bcrypt.compare(password, row.password_hash);
+    const match = await bcrypt.compare(password, row.PasswordHash);
     if (!match) {
       return res.status(401).json({ ok: false, error: 'Invalid email or password' });
     }
@@ -170,7 +215,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// logout
+// ---------- API: logout ----------
 app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(err => {
     if (err) {
@@ -178,11 +223,11 @@ app.post('/api/auth/logout', (req, res) => {
       return res.status(500).json({ ok: false, error: 'Server error' });
     }
     res.clearCookie('cs_sess');
-    res.json({ ok: true });
+    return res.json({ ok: true });
   });
 });
 
-// ----- static frontend -----
+// ---------- Static frontend ----------
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;

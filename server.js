@@ -12,26 +12,32 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// ---------- DB config ----------
+// ---------- DB config: use managed identity (AD-only friendly) ----------
 const dbConfig = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  server: process.env.DB_SERVER,
+  server: process.env.DB_SERVER,          // e.g. cornerstonedatabase.database.windows.net
+  database: process.env.DB_NAME,          // Cornerstone_Plus_Users
   port: parseInt(process.env.DB_PORT || '1433', 10),
-  database: process.env.DB_NAME,
   options: {
     encrypt: true,
     trustServerCertificate: false
+  },
+  // IMPORTANT: no user/password – use the App Service's managed identity
+  authentication: {
+    type: 'azure-active-directory-msi-app-service',
+    options: {
+      // for system-assigned MI, nothing else needed
+      // for user-assigned, you'd add: clientId: process.env.MI_CLIENT_ID
+    }
   }
 };
 
 const poolPromise = sql.connect(dbConfig);
 
 poolPromise
-  .then(() => console.log('✅ Connected to SQL database'))
+  .then(() => console.log('✅ Connected to SQL database (managed identity)'))
   .catch(err => {
     console.error('❌ Failed to connect to SQL database', err);
-    // don’t throw – we want the app to stay up so we can see JSON errors
+    // don't throw – app stays up so we can see JSON errors
   });
 
 // ---------- Middleware ----------
@@ -49,7 +55,7 @@ app.use(session({
   }
 }));
 
-// Map DB row to JSON
+// Map DB row to JSON used by frontend
 function userFromRow(row) {
   if (!row) return null;
   return {
@@ -97,7 +103,7 @@ app.get('/api/me', async (req, res) => {
     return res.status(500).json({
       user: null,
       error: 'Server error',
-      detail: err.message       // DEBUG
+      detail: err.message
     });
   }
 });
@@ -169,7 +175,7 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: 'Server error',
-      detail: err.message      // DEBUG – this is the bit we want to see
+      detail: err.message
     });
   }
 });
@@ -222,7 +228,7 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: 'Server error',
-      detail: err.message      // DEBUG
+      detail: err.message
     });
   }
 });

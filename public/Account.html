@@ -367,8 +367,8 @@
   <main class="shell">
     <header class="brandbar">
       <div class="brandbar__identity">
-        <div class="logo">Corner<b>Authenticator</b></div>
-        <p class="brand-tag">Secure and Safe</p>
+        <div class="logo">Corner<b>Auth</b></div>
+        <p class="brand-tag">Single, secure entry point for the Cornerstone SQL Server platform.</p>
       </div>
       <div class="brand-meta">
         <div class="brand-meta__row">
@@ -489,7 +489,8 @@
     </div>
   </main>
 
-  <script>
+  <script type="module">
+    import { ensureSession, startSessionHeartbeat } from './Js/auth.js';
     // ---------- helpers ----------
     const $  = (s, r=document) => r.querySelector(s);
     const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
@@ -559,7 +560,6 @@
 
     // ---------- API ----------
     const API = {
-      async me(){ const r = await fetch('/api/me', { credentials:'include' }); return r.ok ? r.json() : {}; },
       async login(email, password){
         const r = await fetch('/api/auth/login', {
           method:'POST', headers:{ 'Content-Type':'application/json' }, credentials:'include',
@@ -627,8 +627,12 @@
     }
 
     async function refreshMe(){
-      try{ const { user } = await API.me(); renderProfile(user); }
-      catch{ renderProfile(null); }
+      try{
+        const user = await ensureSession();
+        renderProfile(user);
+      }catch{
+        renderProfile(null);
+      }
     }
 
     // ---------- submit: login ----------
@@ -691,9 +695,13 @@
     });
     ui.refreshBtn.addEventListener('click', refreshMe);
 
-    // initial load
+    // initial load + keep session alive in background
     refreshMe();
+    startSessionHeartbeat({
+      immediate: false,
+      onAuthenticated: renderProfile,
+      onUnauthenticated: () => renderProfile(null)
+    });
   </script>
 </body>
 </html>
-

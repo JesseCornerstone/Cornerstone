@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Scenic Rim Interactive Mapping — SRRC</title>
+<link rel="icon" type="image/png" href="./images/Flavour icon.png">
+<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css"/>
+
+<style>
+  :root{ --brand:#a70b13; --brand2:#7f0e15; --bg:#f6f7f9; --ink:#0b0d12; --border:#e1e3e6; --radius:14px; --shadow:0 6px 18px rgba(16,21,28,.08); }
+  html,body{height:100%;margin:0}
+  body{display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;color:#fff;background:linear-gradient(90deg,var(--brand),var(--brand2));box-shadow:var(--shadow)}
+  .brand{font-weight:800;letter-spacing:.2px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{border:none;border-radius:999px;padding:10px 14px;cursor:pointer;color:#fff;background:rgba(255,255,255,.14)}
+  .btn:hover{background:rgba(255,255,255,.22)}
+  .btn.linklike{background:transparent;border:1px solid rgba(255,255,255,.45)}
+  #contextBar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid var(--border)}
+  .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:4px 10px;font-size:12px}
+  main{flex:1;min-height:520px;display:grid;grid-template-columns:clamp(280px,24vw,420px) 1fr;gap:12px;padding:12px}
+  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+  #viewWrap{position:relative;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  #viewDiv{position:absolute;inset:0}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);background:#fff;padding:6px}
+  .tab{flex:1;min-width:0;text-align:center;border-radius:10px;padding:8px 10px;font-weight:700;color:#7a0f16;background:#fff;cursor:pointer}
+  .tab[aria-selected="true"]{background:#fff1f3;border:1px solid #f2c7cc}
+  .panel{display:none;padding:12px}
+  .panel.active{display:block}
+  #statusBar{display:flex;gap:24px;align-items:center;padding:6px 16px;background:#fff;border-top:1px solid var(--border);color:#555;font-size:12px}
+  #loadingMask{position:absolute;inset:0;background:rgba(255,255,255,.65);display:none;align-items:center;justify-content:center;z-index:6}
+  .spinner{width:64px;height:64px;border-radius:50%;border:6px solid rgba(167,11,19,.25);border-top-color:#a70b13;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .card{border:1px solid #e1e3e6;border-radius:12px;padding:14px;margin:10px 0;background:#fff;box-shadow:0 2px 10px rgba(16,21,28,.05)}
+  .brandbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:-14px -14px 14px -14px;color:#fff;background:linear-gradient(90deg,var(--brand),var(--brand2));border-radius:12px 12px 0 0}
+  .brandbar img{width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.6);background:#fff}
+  .brandbar h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}
+  .brandbar .muted{margin-left:auto;opacity:.95;font-weight:600}
+  .rpt-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:18px}
+  .propmap{grid-column:1 / -1}
+  .propmap-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;align-items:start}
+  .badge-pill{display:inline-block;border:1px solid #dadde2;border-radius:999px;padding:4px 10px;margin:4px 6px 0 0;background:#fafbfc}
+  .kv{margin-top:8px;font-size:14px;color:#333}.kv div{margin:4px 0}
+  img.map{max-width:100%;border:1px solid #e6e8ec;border-radius:10px}
+  .section-title{margin:0 0 10px;font-size:18px}
+  .overlay-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .backbtn{display:inline-block;border:1px solid #d7d7d7;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;text-decoration:none;background:#f7f7f7}
+  .backbtn:hover{background:#eee}
+  .sumlist{margin:6px 0 0 18px;padding:0}.sumlist li{margin:8px 0 12px}
+  .rpt-footer{margin-top:14px;padding-top:8px;border-top:1px dashed #ddd;font-size:12px;color:#555}
+  .leg{font-size:13px;line-height:1.35;margin-top:8px}
+  .leg .row{display:flex;align-items:center;gap:8px;margin:2px 0}
+  .leg .swbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;padding:1px;border:1px solid #999;border-radius:3px;overflow:hidden;background:#fff}
+  .leg .swbox img,.leg .swbox canvas,.leg .swbox svg{width:100%;height:100%;display:block;object-fit:contain}
+  @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.card{page-break-inside:avoid}}
+  #rptOverlay{position:fixed; inset:0; display:none; z-index:9999; background:rgba(246,247,249,.94); backdrop-filter:saturate(1.2) blur(2px); place-items:center; padding:24px}
+  #rptCard{width:min(880px,92vw); border:1px solid #e6e8ec; border-radius:16px; background:#fff; box-shadow:0 20px 48px rgba(16,21,28,.12)}
+  #rptBrand{display:flex; align-items:center; gap:12px; color:#fff; background:linear-gradient(90deg,#a70b13,#7f0e15); padding:14px 16px; border-radius:16px 16px 0 0}
+  #rptBrand img{ width:28px; height:28px; border-radius:6px; border:1px solid rgba(255,255,255,.6); background:#fff }
+  #rptBrand h1{ margin:0; font-size:18px; font-weight:800; letter-spacing:.2px }
+  #rptBody{ padding:16px }
+  #rptStatus{ display:flex; align-items:center; gap:10px; color:#344054 }
+  #rptRing{ width:22px; height:22px; border:3px solid #e8e8ee; border-top-color:#a70b13; border-radius:50%; animation:spin 1s linear infinite }
+  #rptProgress{ height:8px; background:#eef0f4; border-radius:999px; overflow:hidden; margin-top:10px }
+  #rptBar{ height:100%; width:0%; background:linear-gradient(90deg,#a70b13,#df5056); transition:width .25s ease; border-radius:999px }
+  #rptSteps{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px }
+  .rptStep{ background:#fbfbfc; border:1px dashed #e2e4e8; border-radius:10px; padding:10px; font-size:12px; color:#475467 }
+  .rptDone{ border-color:#cfe6d2; background:#f2faf3; color:#1e7a31; font-weight:600 }
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">Scenic Rim Interactive Mapping</div>
+    <div class="toolbar">
+      <button id="btnHome" class="btn linklike" title="Back to index">Home</button>
+      <button id="btnPrintReport" class="btn">Print Report</button>
+    </div>
+  </header>
+
+  <div id="contextBar">
+    <span id="lotBadge" class="badge">Lot: --</span>
+    <span id="areaBadge" class="badge">Area: -- m²</span>
+    <span id="classBadge" class="badge">Class: --</span>
+  </div>
+
+  <main>
+    <aside id="left">
+      <div class="tabs" role="tablist">
+        <button class="tab" id="tab-summary"  role="tab" aria-selected="true"  aria-controls="panel-summary">Summary</button>
+        
+      </div>
+
+      <section id="panel-summary" class="panel active" role="tabpanel" aria-labelledby="tab-summary">
+        <p>--Under Works--</p>
+      </section>
+
+      <section id="panel-setbacks" class="panel" role="tabpanel" aria-labelledby="tab-setbacks">
+        <p>Setback tools are disabled in the default build.</p>
+      </section>
+
+      <section id="panel-proposal" class="panel" role="tabpanel" aria-labelledby="tab-proposal">
+        <p>Proposal drawing is disabled in the default build.</p>
+      </section>
+
+      <section id="panel-yield" class="panel" role="tabpanel" aria-labelledby="tab-yield">
+        <p>Yield calculator is disabled in the default build.</p>
+      </section>
+    </aside>
+
+    <div id="viewWrap">
+      <div id="viewDiv"></div>
+      <div id="loadingMask"><div class="spinner" aria-label="Loading…"></div></div>
+    </div>
+  </main>
+
+  <div id="statusBar">
+    <span id="statusCoords">Coords: --</span>
+    <span id="statusZoom">Zoom: --</span>
+    <span id="statusScale">Scale: --</span>
+  </div>
+
+  <!-- In-page report builder overlay -->
+  <div id="rptOverlay" aria-hidden="true">
+    <div id="rptCard">
+      <div id="rptBrand">
+        <img src="./images/Flavour icon.png" alt="Logo">
+        <h1>Scenic Rim Interactive Mapping — Building report</h1>
+      </div>
+      <div id="rptBody">
+        <div id="rptStatus"><div id="rptRing"></div><div id="rptMsg">Starting…</div></div>
+        <div id="rptProgress"><div id="rptBar"></div></div>
+        <div id="rptSteps">
+          <div class="rptStep" id="rptS1">Locate parcel</div>
+          <div class="rptStep" id="rptS2">Resolve address</div>
+          <div class="rptStep" id="rptS3">Render overlays</div>
+          <div class="rptStep" id="rptS4">Compose document</div>
+        </div>
+        <div style="margin-top:10px;color:#667085;font-size:12px">
+          Keep this tab visible while the report builds so map screenshots can render smoothly.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
+    import WebMap from "https://js.arcgis.com/4.30/@arcgis/core/WebMap.js";
+    import MapView from "https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js";
+    import Graphic from "https://js.arcgis.com/4.30/@arcgis/core/Graphic.js";
+    import GraphicsLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js";
+    import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
+    import Expand from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Expand.js";
+    import ScaleBar from "https://js.arcgis.com/4.30/@arcgis/core/widgets/ScaleBar.js";
+    import Home from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Home.js";
+    import LayerList from "https://js.arcgis.com/4.30/@arcgis/core/widgets/LayerList.js";
+    import Legend from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Legend.js";
+    import BasemapGallery from "https://js.arcgis.com/4.30/@arcgis/core/widgets/BasemapGallery.js";
+    import Fullscreen from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Fullscreen.js";
+    import * as reactiveUtils from "https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js";
+    import * as geometryEngine from "https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js";
+    import * as symbolUtils from "https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js";
+    import * as locator from "https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js";
+
+    /* Tunables */
+    const TOUCH_BUFFER_M = 6;
+    const SWATCH_PX = 16;
+    const GEOCODER_URL = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer";
+    const SRRC_CENTER = [152.63583737978115,-28.027413275017153];
+    const SRRC_SCALE = 288895.277144;
+    const M2="m²";
+    const REPORT_EXTENT_FACTOR = 2.6; // widen view ~2–3 lots
+
+    /* Helpers */
+    const $=id=>document.getElementById(id);
+    const setText=(id,t)=>{const el=$(id); if(el) el.textContent=t;};
+    const showLoading=on=>{const m=$("loadingMask"); if(m) m.style.display=on?"flex":"none";};
+    const raf=()=>new Promise(r=>requestAnimationFrame(()=>r()));
+    const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+    const waitViewIdle=async(extra=150)=>{try{await reactiveUtils.whenOnce(()=>!view.updating);}catch{} await raf(); await sleep(extra);};
+    const withViewOnExtent=async(ext,fn)=>{const vp=view.viewpoint?.clone?.(); try{ if(ext){ await view.goTo(ext,{animate:false}); await waitViewIdle(200);} return await fn(); } finally{ if(vp){ try{ await view.goTo(vp,{animate:false}); await waitViewIdle(120);}catch{} } }};
+    const slug=s=>String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+
+    function showRptOverlay(on){ const el=$("rptOverlay"); if(el) el.style.display=on?"grid":"none"; }
+    function setRpt(msg,pct,doneStepId){
+      const bar=$("rptBar"), m=$("rptMsg");
+      if(m && msg!=null) m.textContent=msg;
+      if(bar && pct!=null) bar.style.width=Math.max(0,Math.min(100,pct))+"%";
+      if(doneStepId){ const step=$(doneStepId); if(step) step.classList.add("rptDone"); }
+    }
+
+    const portal=new Portal({url:"https://cornerstonebc.maps.arcgis.com"});
+
+    /* Map */
+    let webmap=new WebMap({portalItem:{id:"1a8566bfdf414c4f8361d7cda14e34a9",portal}});
+    const selLayer=new GraphicsLayer({listMode:"hide"}); webmap.add(selLayer);
+    const view=new MapView({container:"viewDiv",map:webmap,center:SRRC_CENTER,scale:SRRC_SCALE,constraints:{snapToZoom:false}});
+
+    const inText=(t,p="")=>String(t||"")+" "+String(p||"");
+    const isDNT=(title,id="",tags=[])=>{
+      const t=String(title||""); const i=String(id||""); const tag=(tags||[]).join("|");
+      return /do[\s-]*not[\s-]*touch/i.test(t)||/do[\s-]*not[\s-]*touch/i.test(i)||/do[\s-]*not[\s-]*touch/i.test(tag);
+    };
+    const isUtility=(title,id="",tags=[])=>/\b(utilit(y|ies)|power|electric|telecom|gas|water|sewer|storm[-\s]?water|reticulation|service)\b/i.test(inText(title,id)+" "+(tags||[]).join(" "));
+    const isWaterOrSewer=(path)=>/\b(water|sewer|storm[\s-]*water|drainage|watercourse)\b/i.test(String(path||""));
+    const isAcid=(t,p="")=>/\bacid\b/i.test(inText(t,p));
+    const isTransport=(t,p="")=>/\b(transport|road|rail|corridor|traffic|cycle|bikeway|pedestrian|carpark|parking|transit|bus|ferry)\b/i.test(inText(t,p));
+    const isAir=(t,p="")=>/\b(air\s*quality|air-quality|air|pollution)\b/i.test(inText(t,p));
+    const isNoise=(t,p="")=>/\b(noise|acoustic)\b/i.test(inText(t,p));
+    const isZoning=(t,p="")=>/\b(zoning|zone|zones)\b/i.test(inText(t,p));
+    const isBushfire=(t,p="")=>/\b(bush[-\s]?fire|bushfire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p));
+
+    const kidsOf=n=>(n.layers?.toArray?.()??n.layers)||(n.sublayers?.toArray?.()??n.sublayers)||[];
+    const nodePath=n=>{const bits=[]; let cur=n; while(cur){bits.unshift(cur.title||cur.id||"node"); cur=cur.parent;} return bits.join(" / ");};
+
+    function walkAny(node,cb,inheritedDNT=false){
+      if(!node) return;
+      const t=node.title||node.id||"", id=node.id||"", tg=node.portalItem?.tags||[];
+      const flag=inheritedDNT||isDNT(t,id,tg);
+      cb(node,flag);
+      (kidsOf(node)||[]).forEach(ch=>walkAny(ch,cb,flag));
+    }
+    function keepOnHidden(node){
+      if("visible"in node){try{node.visible=true;}catch{}}
+      if("listMode"in node){try{node.listMode="hide";}catch{}}
+      try{node.minScale=0;node.maxScale=0;}catch{}
+      if(node.type==="sublayer"){ try{ node.updateFromJSON({minScale:0,maxScale:0}); }catch{} }
+      let p=node.parent; while(p){ if("visible"in p){try{p.visible=true;}catch{}} p=p.parent; }
+    }
+    function startHidden(node){
+      if("visible"in node){try{node.visible=false;}catch{}}
+      if("listMode"in node){try{node.listMode="show";}catch{}}
+    }
+    function enforceOverlayRules(){ walkAny(webmap,(node,underDNT)=>{ if(node.type==="graphics"){try{node.listMode="hide";}catch{} return;} if(!("visible"in node)) return; underDNT?keepOnHidden(node):startHidden(node); }); }
+    [300,900,1800,3500].forEach(ms=> setTimeout(()=>{ try{enforceOverlayRules();}catch{} },ms));
+    (async()=>{ showLoading(true); try{ await webmap.loadAll(); enforceOverlayRules(); }catch(e){ console.warn("WebMap auth/fail; fallback basemap",e); webmap=new WebMap({basemap:"streets-vector"}); webmap.add(selLayer); view.map=webmap; } finally{ showLoading(false);} })();
+
+    /* Widgets */
+    view.ui.add(new Home({view}),"top-left");
+    view.ui.add(new ScaleBar({view,unit:"metric"}),"bottom-left");
+    const layerList=new LayerList({view,listItemCreatedFunction(e){
+      const item=e.item, node=item.sublayer||item.layer;
+      if(!node) return;
+      if(node.type==="graphics"){ item.visible=false; item.panel=null; try{node.listMode="hide";}catch{} return; }
+      let cur=node, inDNT=false;
+      while(cur){ const t=cur.title||"", i=cur.id||"", tg=cur.portalItem?.tags||[]; if(isDNT(t,i,tg)){ inDNT=true; break; } cur=cur.parent; }
+      if(inDNT){ keepOnHidden(node); item.visible=false; item.panel=null; }
+      else{ try{node.listMode="show";}catch{} item.visible=true; item.panel={content:"legend"}; }
+    }});
+    view.ui.add(new Expand({view,content:layerList,expandIconClass:"esri-icon-layers",expanded:true}),"top-right");
+    view.ui.add(new Expand({view,content:new Legend({view}),expandIconClass:"esri-icon-legend"}),"top-right");
+    view.ui.add(new Expand({view,content:new BasemapGallery({view}),expandIconClass:"esri-icon-basemap"}),"top-right");
+    view.ui.add(new Fullscreen({view}),"top-right");
+    view.ui.add(new Search({view,includeDefaultSources:true,popupEnabled:true,allPlaceholder:"Search address"}),{position:"top-right",index:0});
+
+    view.watch("extent",()=>{ const c=view.center; setText("statusCoords",`Coords: ${c.longitude.toFixed(5)}, ${c.latitude.toFixed(5)}`); setText("statusZoom",`Zoom: ${view.zoom.toFixed(1)}`); setText("statusScale",`Scale: 1:${Math.round(view.scale)}`); });
+
+    /* Parcel selection & badges */
+    const parseNumberLike=raw=>{ if(raw==null) return null; let s=String(raw).trim(); if(!s) return null; const hasHA=/(^|[^a-z])ha([^a-z]|$)/i.test(s)||/\bhectare(s)?\b/i.test(s); s=s.replace(/,/g,"").replace(/square\s*met(re|er)s?/ig,"").replace(/m2|m\u00B2|sqm|sq\.?m/ig,"").trim(); let n=parseFloat(s); if(isNaN(n)) return null; if(hasHA) n*=10000; return n; };
+    function getLotAreaSqm(attrs){ const strong=["LOT_AREA_M2","LOT_SIZE_M2","LOT_SIZE_SQM","LOT_AREA_SQM","AREA_SQM","SITE_AREA_SQM","LAND_AREA_SQM","LOT_AREA","LOT_SIZE","SITE_AREA","LAND_AREA","AREA_M2","AREA (M2)","AREA(M2)","AREA_M^2","AREA_HA","HECTARES"]; for(const k of strong){ const v=k in attrs?parseNumberLike(attrs[k]):null; if(v!=null){ if(v>0&&v<50&&(k==="AREA_HA"||k==="HECTARES")) return v*10000; return v; } } for(const k2 in attrs){ const v2=attrs[k2]; if(/(lot|site|land).*area/i.test(k2)||/area.*(sqm|m2|m\^2|square)/i.test(k2)||(/(lot|site).*size/i.test(k2))){ const val=parseNumberLike(v2); if(val) return val; } } return null; }
+    function parseParcelMeta(attrs){ const keys=rx=>Object.keys(attrs).find(k=>rx.test(k)); const lot=attrs["LOT"]??attrs["LOTNO"]??attrs["LOT_NO"]??attrs["LOTNUMBER"]??(keys(/^lot[\w_]*$/i)&&String(attrs[keys(/^lot[\w_]*$/i)])); const plan=attrs["PLAN"]??attrs["PLANNO"]??attrs["PLAN_NO"]??(keys(/^plan[\w_]*$/i)&&String(attrs[keys(/^plan[\w_]*$/i)])); let lotplan=attrs["LOT_PLAN"]??attrs["LOT_PLAN_NO"]??attrs["LOTPLAN"]??attrs["LOTPLAN_NO"]??attrs["LOTPLAN_TXT"]??attrs["LOT_PLAN_TXT"]??attrs["LOT_PLAN_TEXT"]??attrs["LOTPLAN_TEXT"]; if(!lotplan && lot && plan) lotplan=lot+"/"+plan; if(!lotplan){ for(const key in attrs){ const s=String(attrs[key]||"").toUpperCase(); const m=s.match(/\b(\d+)\s*\/\s*([A-Z]{1,4}\s*\d+)\b/); if(m){ lotplan=m[1]+"/"+m[2].replace(/\s+/g,""); break; } } } return {lot,plan,lotplan}; }
+    const geomAreaSqmSafe=g=>{ try{ const a=Math.abs(geometryEngine.planarArea(g,"square-meters")||0); return a>0?a:null; }catch{ return null; } };
+
+    /* Address helpers */
+    function smartJoin(parts){ return parts.filter(Boolean).join(" ").replace(/\s+/g," ").trim(); }
+    const _get = (o, ks) => { for (const k of ks) if (k in o && String(o[k] ?? "").trim()) return String(o[k]).trim(); return null; };
+
+    function normalizeAddress(a){
+      if(!a) return null;
+      let s=String(a).replace(/^.*?\bAddresses?\s*:\s*/i,"");
+      s=s.replace(/\s+/g," ").trim().replace(/\s*,\s*/g,", ");
+      if(/^QLD(?:\s*\d{4})?$|^Queensland$/i.test(s)) return null;
+      return s;
+    }
+    const STREET_TYPE="(?:St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Cres|Crescent|Court|Ct|Lane|Ln|Terrace|Ter|Way|Pde|Parade|Pl|Place|Blvd|Boulevard|Close|Gr|Grove|Hwy|Highway)";
+    const ADDRESS_RE=new RegExp(String.raw`(?:\d+[A-Z]?\/)?\d{1,5}[A-Z]?\s+[A-Za-z][A-Za-z\s.'-]+?\s+${STREET_TYPE}(?:\s+[A-Za-z][A-Za-z\s.'-]+)?(?:\s+(?:QLD|Queensland))?(?:\s+\d{4})?`,"i");
+
+    function looksLikeAddressLayer(node){
+      const t = ((node.title || "") + " " + nodePath(node)).toLowerCase();
+      if(/landparcelpropertyframework.*addresses/i.test(t)) return true;
+      return /gnaf|address|property.*address|street\s*address|site\s*address|address\s*points|road\s*centerline|centreline/i.test(t);
+    }
+    function pickAddressFromValues(attrs){
+      if(!attrs) return null;
+      const full=_get(attrs,["FULL_ADDRESS","ADDRESS_FULL","ADDRESS1","SITE_ADDRESS","PROPERTY_ADDRESS","PROP_ADDRESS","PRIMARY_ADDRESS","GNAF_FULL_ADDRESS","GNAF_ADDRESS","ADDR_FULL","ADDR_LABEL","STREET_ADDRESS","POSTAL_ADDRESS","ADDRESS","ADDRESSES","LABEL","NAME","TITLE"]);
+      if(full) return normalizeAddress(full);
+
+      const unit=_get(attrs,["UNIT_NO","UNIT_NUMBER","UNIT","APARTMENT","FLAT","SUITE","SUB_UNIT"]);
+      const numP=_get(attrs,["HOUSE_PREFIX","NUMBER_PREFIX","ADDR_NUM_PREFIX","NUMBER_PRE"]);
+      const num=_get(attrs,["HOUSE_NO","HOUSE_NUMBER","STREET_NO","STREET_NUMBER","PRIMARY_NO","PROPERTY_NO","NUMBER"]);
+      const numS=_get(attrs,["HOUSE_SUFFIX","NUMBER_SUFFIX","ADDR_NUM_SUFFIX","NUMBER_SUF"]);
+      const stNm=_get(attrs,["STREET_NAME","ST_NAME","ROAD_NAME","RD_NAME","ADD_STREET_NAME","STREET"]);
+      const stTp=_get(attrs,["STREET_TYPE","ST_TYPE","ROAD_TYPE","RD_TYPE","ADDR_TYPE"]);
+      const stSf=_get(attrs,["STREET_SUFFIX","ST_SUFFIX","ROAD_SUFFIX","RD_SUFFIX"]);
+      const suburb=_get(attrs,["SUBURB","SUBURB_NAME","LOCALITY","LOCALITY_NAME","TOWN","CITY","SUB_NAME"]);
+      const state=_get(attrs,["STATE","STATE_ABBR","STATE_CODE"]) || "QLD";
+      const post=_get(attrs,["POSTCODE","POST_CODE","ZIP"]);
+
+      const line1=smartJoin([unit?`${unit}/`:null, smartJoin([numP,num,numS]), smartJoin([stNm,stTp,stSf])]);
+      const line2=smartJoin([suburb,state,post]);
+      const composed=smartJoin([line1,line2]);
+      if(line1) return normalizeAddress(composed);
+
+      let best=null;
+      for(const k in attrs){
+        const raw=String(attrs[k]??"").trim();
+        if(!raw) continue;
+        const cleaned=raw.replace(/^.*?\bAddresses?\s*:\s*/i,"");
+        const m=cleaned.match(ADDRESS_RE);
+        if(m){
+          const cand=normalizeAddress(m[0]);
+          if(!best){ best=cand; } else {
+            const score = (s)=> (/\d/.test(s)?1:0)*100 + s.length;
+            if(score(cand)>score(best)) best=cand;
+          }
+        }
+      }
+      return best;
+    }
+    const bestAddressFromAttrs = (attrs)=> pickAddressFromValues(attrs);
+
+    function flattenFeatureNodes(){ const out=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) out.push(n); }); return out; }
+    const looksLikeParcelLayer=node=>/(cadast|parcel|dcdb|lot|property)/i.test((node.title||"").toLowerCase());
+
+    async function tryFrameworkAddresses(geom){
+      const centroid=geometryEngine.centroid(geom);
+      const nodes=flattenFeatureNodes().filter(n=>/landparcelpropertyframework.*addresses/i.test((n.title||"").toLowerCase()));
+      for(const n of nodes){
+        try{
+          await n.load();
+          const res=await n.queryFeatures({ geometry:centroid, distance:80, units:"meters", spatialRelationship:"intersects", returnGeometry:false, outFields:["*"], maxRecordCountFactor:10 });
+          for(const f of (res.features||[])){ const addr=bestAddressFromAttrs(f.attributes); if(addr) return addr; }
+        }catch{}
+      }
+      return null;
+    }
+
+    async function scanAddressLayers(lotGeom){
+      const nodes=flattenFeatureNodes().filter(n=>{ try{ return looksLikeAddressLayer(n);}catch{ return false;} });
+      const preferred=nodes.filter(n=>/landparcelpropertyframework.*addresses/i.test((n.title||"").toLowerCase()));
+      const ordered=preferred.length?[...preferred, ...nodes.filter(n=>!preferred.includes(n))]:nodes;
+
+      const candidates=[]; const centroid=geometryEngine.centroid(lotGeom);
+      for(const n of ordered){
+        try{
+          await n.load();
+          const res1=await n.queryFeatures({ geometry:lotGeom, spatialRelationship:"intersects", returnGeometry:false, outFields:["*"], maxRecordCountFactor:6 });
+          for(const f of (res1.features||[])){ const addr=bestAddressFromAttrs(f.attributes); if(addr) candidates.push({addr,score:100}); }
+          const res2=await n.queryFeatures({ geometry:centroid, distance:60, units:"meters", spatialRelationship:"intersects", returnGeometry:false, outFields:["*"], maxRecordCountFactor:6 });
+          for(const f of (res2.features||[])){ const addr=bestAddressFromAttrs(f.attributes); if(addr) candidates.push({addr,score:70}); }
+        }catch{}
+      }
+      candidates.sort((a,b)=>{ const dn=(/\d/.test(b.addr)?1:0)-(/\d/.test(a.addr)?1:0); if(dn) return dn; const ds=b.score-a.score; if(ds) return ds; return b.addr.length-a.addr.length; });
+      return candidates.length?candidates[0].addr:null;
+    }
+
+    async function reverseGeocodeAddress(point){
+      try{
+        const res = await locator.locationToAddress(GEOCODER_URL,{ location: point });
+        const a = res?.address || res?.attributes?.Match_addr || res?.attributes?.LongLabel || res?.attributes?.Address;
+        return normalizeAddress(a) || null;
+      }catch{ return null; }
+    }
+
+    async function resolveBestAddress(geom, parcelFeature){
+      let addr = parcelFeature ? bestAddressFromAttrs(parcelFeature.attributes || {}) : null;
+      if(!addr){ try{ addr=await tryFrameworkAddresses(geom);}catch{} }
+      if(!addr){ try{ addr=await scanAddressLayers(geom);}catch{} }
+      if(!addr){ try{ const cen=geometryEngine.centroid(geom); addr=await reverseGeocodeAddress(cen);}catch{} }
+      return addr || "Address unavailable";
+    }
+
+    /* Parcel picking */
+    async function findParcelAtPoint(point){
+      const all=flattenFeatureNodes().filter(n=>n.geometryType==="polygon");
+      const pref=[],rest=[];
+      for(const n of all){ try{ await n.load(); }catch{} (looksLikeParcelLayer(n)?pref:rest).push(n); }
+      const layers=[...pref,...rest];
+
+      const collect=async(opts)=>{ const out=[]; for(const L of layers){ try{ const r=await L.queryFeatures({...opts,returnGeometry:true,outFields:["*"],maxRecordCountFactor:2}); (r.features||[]).forEach(f=>out.push({layer:L,feature:f})); }catch{} } return out; };
+
+      let cand=await collect({geometry:point,spatialRelationship:"intersects"});
+      let contains=cand.filter(({feature})=>{ try{ return geometryEngine.contains(feature.geometry,point); }catch{ return false; } });
+      if(contains.length){
+        let best=contains[0], bestD=Infinity;
+        for(const c of contains){
+          let d=Infinity; try{ const cen=geometryEngine.centroid(c.feature.geometry); d=geometryEngine.distance(point,cen)||Infinity; }catch{}
+          if(d<bestD){ best=c; bestD=d; }
+        }
+        return best.feature;
+      }
+
+      cand=await collect({geometry:point,distance:1.5,units:"meters",spatialRelationship:"intersects"});
+      if(cand.length){
+        let best=cand[0], bestD=Infinity;
+        for(const c of cand){
+          let d=Infinity; try{ const near=geometryEngine.nearestCoordinate(c.feature.geometry,point); d=near?.distance??Infinity; }catch{}
+          if(d<bestD){ best=c; bestD=d; }
+        }
+        return best.feature;
+      }
+      return null;
+    }
+
+    /* Info + badges */
+    let lastParcelInfo={feature:null,lotText:"--",areaText:`-- ${M2}`,classText:"--",addressText:"--",councilText:"Scenic Rim Regional Council"};
+    function outlineSelection(geom){
+      selLayer.removeAll();
+      if(!geom) return;
+      selLayer.add(new Graphic({geometry:geom,symbol:{type:"simple-fill",color:[0,0,0,0],outline:{color:"#a70b13",width:2}}}));
+    }
+    function parseCouncil(attrs){
+      if(!attrs) return null;
+      const first=(...keys)=>{ for(const k of keys){ if(k in attrs){ const v=String(attrs[k]??"").trim(); if(v) return v; } } return null; };
+      return first("COUNCIL","COUNCIL_NAME","LGA","LGA_NAME","LOCAL_GOVERNMENT_AREA","AUTHORITY","ADMIN_BODY") || "Scenic Rim Regional Council";
+    }
+    function parcelInfoFromFeature(feat){
+      const attrs=feat?.attributes||{};
+      const meta=parseParcelMeta(attrs);
+      const lotplan=meta.lotplan || ((meta.lot||meta.plan)?[meta.lot,meta.plan].filter(Boolean).join("/"):"--");
+      const area=getLotAreaSqm(attrs) ?? geomAreaSqmSafe(feat.geometry) ?? null;
+      const cls=(area!=null && area<450)?"Small lot":"Standard lot";
+      const address=bestAddressFromAttrs(attrs) || "--";
+      const council=parseCouncil(attrs) || "Scenic Rim Regional Council";
+      return { lotText:lotplan||"--", areaText:area!=null?(Math.round(area).toLocaleString()+" "+M2):`-- ${M2}`, classText:cls, addressText:address, councilText:council };
+    }
+    function updateBadgesFromFeature(feat){
+      const info=parcelInfoFromFeature(feat);
+      $("lotBadge").textContent="Lot: "+info.lotText;
+      $("areaBadge").textContent="Area: "+info.areaText;
+      $("classBadge").textContent="Class: "+info.classText;
+      lastParcelInfo={feature:feat,...info};
+    }
+
+    /* Hide unused overlays in LayerList */
+    const bufferedAOIFor=(node,geom)=>{ try{ const gt=(node.geometryType||"").toLowerCase(); if(gt==="point"||gt==="multipoint"||gt==="polyline") return geometryEngine.buffer(geom,TOUCH_BUFFER_M,"meters"); }catch{} return geom; };
+    async function countFeatures(node,geom){
+      const g=bufferedAOIFor(node,geom);
+      try{ if(typeof node.queryFeatureCount==="function"){ const c=await node.queryFeatureCount({geometry:g,spatialRelationship:"intersects"}); return Number(c)||0; } }catch{}
+      try{ if(typeof node.queryFeatures==="function"){ const q=await node.queryFeatures({geometry:g,spatialRelationship:"intersects",returnGeometry:false,outFields:["*"],num:1}); return q.features?.length?1:0; } }catch{}
+      return 0;
+    }
+    async function hideUnusedOverlaysFor(geom){
+      const nodes=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) nodes.push(n); });
+      for(const n of nodes){
+        const t=n.title||n.id||"", id=n.id||"", tg=n.portalItem?.tags||[];
+        if(isDNT(t,id,tg)) continue;
+        if(isUtility(t,id,tg)) continue;
+        if(isWaterOrSewer(nodePath(n))) continue;
+        try{ await n.load(); const cnt=await countFeatures(n,geom); if("listMode"in n) n.listMode=cnt>0?"show":"hide"; }catch{}
+      }
+      try{ layerList.refresh(); }catch{}
+    }
+
+    /* Consistent extent for all screenshots */
+    let reportExtent=null;
+    const computeReportExtent=(geom)=>{
+      try{ const ext=geom?.extent?.clone?.(); return ext?ext.expand(REPORT_EXTENT_FACTOR):null; }catch{ return null; }
+    };
+    const withReportView = async(fn)=> withViewOnExtent(reportExtent, fn);
+
+    view.on("click", async ev=>{
+      try{
+        showLoading(true);
+        const parcel=await findParcelAtPoint(ev.mapPoint);
+        if(!parcel){ selLayer.removeAll(); return; }
+        updateBadgesFromFeature(parcel);
+        outlineSelection(parcel.geometry);
+        await hideUnusedOverlaysFor(parcel.geometry);
+      } finally { showLoading(false); }
+    });
+
+    /* Legend helpers */
+    async function swatchHTML(symbol){
+      try{
+        const el = await symbolUtils.renderPreviewHTML(symbol, { size:[SWATCH_PX-2,SWATCH_PX-2] });
+        if(el.tagName?.toLowerCase()==="canvas"){
+          return `<span class="swbox"><img alt="" src="${el.toDataURL("image/png")}"></span>`;
+        }
+        try{ el.setAttribute("width","100%"); el.setAttribute("height","100%"); }catch{}
+        return `<span class="swbox">${el.outerHTML}</span>`;
+      }catch{
+        return `<span class="swbox" style="background:#cfcfcf"></span>`;
+      }
+    }
+    const guessLabelFromAttrs=attrs=>{
+      if(!attrs) return null;
+      const patt=[/zone.*(name|type|desc|label|category|code)?/i,/(planning|scheme).*zone/i,/(zone|category|type|class|desc|label)/i];
+      for(const r of patt){ const k=Object.keys(attrs).find(x=>r.test(x)); if(k){ const v=String(attrs[k]??"").trim(); if(v) return v; } }
+      return null;
+    };
+    function getUVInfo(renderer,attrs){
+      if(!renderer||!attrs) return null;
+      const fields=[renderer.field,renderer.field2,renderer.field3].filter(Boolean);
+      const delim=renderer.fieldDelimiter??", ";
+      if(!fields.length) return null;
+      const parts=fields.map(f=>attrs[f]);
+      const key=parts.join(delim);
+      const infos=renderer.uniqueValueInfos||[];
+      let info=infos.find(u=>String(u.value)===String(key));
+      if(!info) info=infos.find(u=>Array.isArray(u.values)&&u.values.some(v=>String(v)===String(key)));
+      if(!info && fields.length===1){
+        info=infos.find(u=>String(u.value)===String(attrs[fields[0]]))||
+              infos.find(u=>Array.isArray(u.values)&&u.values.some(v=>String(v)===String(attrs[fields[0]])));
+      }
+      return info||null;
+    }
+    const ZONE_KEYS=[ "ZONE_CODE","ZONE","ZONE_NAME","ZONING","ZONE_LABEL","ZONE_DESC","ZONE_TYPE","ZONE_CATEGORY","PLANNING_ZONE" ];
+    function pickZoneLabel(attrs){
+      if(!attrs) return null;
+      const code=String(attrs.ZONE_CODE ?? attrs.ZONE ?? "").trim();
+      const name=String(attrs.ZONE_NAME ?? attrs.ZONING ?? "").trim();
+      if(code && name) return `${code} – ${name}`;
+      for(const k of ZONE_KEYS){ const v=attrs[k]; if(v!=null && String(v).trim()) return String(v).trim(); }
+      return null;
+    }
+    async function legendFromRendererUsingFeatures(layerNode,lotGeom){
+      const gt=(layerNode.geometryType||"").toLowerCase();
+      const isZone=isZoning(layerNode.title||"",nodePath(layerNode));
+      const g=(gt==="point"||gt==="multipoint"||gt==="polyline") ? geometryEngine.buffer(lotGeom,TOUCH_BUFFER_M,"meters") : lotGeom;
+
+      let feats=[];
+      try{
+        const q=await layerNode.queryFeatures({ geometry:g,spatialRelationship:"intersects",returnGeometry:true,outFields:["*"],maxRecordCountFactor:6 });
+        feats=q.features||[];
+      }catch{}
+      if(!feats.length) return {items:[]};
+
+      const itemMap=new Map();
+      for(const f of feats){
+        const gph=new Graphic({geometry:f.geometry,attributes:f.attributes,layer:layerNode});
+        let sym=null;
+        try{ sym = await symbolUtils.getDisplayedSymbol(gph, view); }catch{}
+        if(!sym){
+          const r=layerNode.renderer;
+          sym = r?.symbol || r?.defaultSymbol || f.symbol || null;
+        }
+        if(!sym) continue;
+
+        let label = isZone ? pickZoneLabel(f.attributes) : null;
+        if(!label){
+          const r=layerNode.renderer;
+          if(r?.type==="unique-value"){
+            const info=getUVInfo(r,f.attributes);
+            if(info) label = info.label ?? String(info.value ?? (info.values||[]).join(", "));
+          }else if(r?.type==="class-breaks" && r.field){
+            const v=Number(f.attributes?.[r.field]);
+            if(!Number.isNaN(v)){
+              const info=(r.classBreakInfos||[]).find(b=>{
+                const min=(b.minValue==null?-Infinity:b.minValue);
+                const max=(b.maxValue==null? Infinity:b.maxValue);
+                return v>=min && v<=max;
+              });
+              label=info?.label ?? (info ? `${info.minValue ?? ""} – ${info.maxValue ?? ""}` : null);
+            }
+          }
+          if(!label) label=r?.label || layerNode.title || guessLabelFromAttrs(f.attributes) || "Class";
+        }
+        const sw=await swatchHTML(sym);
+        if(!itemMap.has(label)) itemMap.set(label,{label,swatchHTML:sw});
+      }
+      return {items:[...itemMap.values()]};
+    }
+
+    /* Screenshot plumbing */
+    function saveVisibility(root){ const map=new Map(); walkAny(root,(n)=>{ if("visible"in n){ map.set(nodePath(n),{vis:!!n.visible,op:n.opacity,min:n.minScale,max:n.maxScale}); } }); return map; }
+    function restoreVisibility(root,snap){ walkAny(root,(n)=>{ if("visible"in n){ const k=nodePath(n); if(snap.has(k)){ const s=snap.get(k); try{n.visible=s.vis;}catch{} if("opacity"in n && s.op!==undefined){ try{n.opacity=s.op;}catch{} } try{n.minScale=s.min;n.maxScale=s.max;}catch{} } } }); }
+    const isReportableNode=n=> n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function");
+
+    async function intersectingNodesByCategory(geom){
+      const out={zoning:[],bushfire:[],utilities:[],acid:[],transport:[],air:[],noise:[],others:[]};
+      const arr=[]; walkAny(view.map,(n,underDNT)=>{ if(isReportableNode(n)&&!underDNT) arr.push(n); });
+      for(const n of arr){
+        try{
+          await n.load();
+          const cnt=await countFeatures(n,geom);
+          if(!cnt) continue;
+          const t=n.title||"", p=nodePath(n), id=n.id||"", tg=n.portalItem?.tags||[];
+          if(isZoning(t,p)){ out.zoning.push(n); continue; }
+          if(isBushfire(t,p)){ out.bushfire.push(n); continue; }
+          if(isUtility(t,id,tg) || isWaterOrSewer(p)){ out.utilities.push(n); continue; }
+          if(isAcid(t,p)){ out.acid.push(n); continue; }
+          if(isTransport(t,p)){ out.transport.push(n); continue; }
+          if(isAir(t,p)){ out.air.push(n); continue; }
+          if(isNoise(t,p)){ out.noise.push(n); continue; }
+          out.others.push(n);
+        }catch{}
+      }
+      return out;
+    }
+
+    const ancestors=node=>{const out=[]; let p=node?.parent; while(p){out.push(p); p=p.parent;} return out;};
+    const owningLayer=node=>{let c=node; while(c && c.type==="sublayer") c=c.parent; return c && c.type!=="sublayer" ? c : null;};
+    async function awaitRenderFor(nodes){
+      const layers=[...new Set(nodes.map(n=>owningLayer(n)).filter(Boolean))];
+      const views=[];
+      for(const L of layers){ try{views.push(await view.whenLayerView(L));}catch{} }
+      if(views.length){
+        try{await reactiveUtils.whenOnce(()=>views.every(v=>v.updating===false));}catch{}
+      }
+      await waitViewIdle(150);
+    }
+    async function sumCounts(nodes,geom){ let t=0; for(const n of nodes){ t+=await countFeatures(n,geom); } return t; }
+
+    function collectAllUtilitiesNodes(){
+      const all = [];
+      walkAny(view.map, (n, underDNT)=>{
+        if(underDNT) return;
+        if(!isReportableNode(n)) return;
+        const t = n.title || "", id = n.id || "", tg = n.portalItem?.tags || [];
+        if (isUtility(t,id,tg) || isWaterOrSewer(nodePath(n))) all.push(n);
+      });
+      return all;
+    }
+
+    async function screenshotFor(nodes,title,lotGeom,legendOnLot=false,opts={}){
+      if(!nodes?.length || !lotGeom) return null;
+      const forceAllVisible = !!opts.forceAllVisible || /utilities/i.test(title);
+      const present=[];
+      if(forceAllVisible){ for(const n of nodes){ present.push(n); } }
+      else{ for(const n of nodes){ if(await countFeatures(n,lotGeom)>0) present.push(n); } }
+      if(!present.length) return null;
+
+      const visSnap=saveVisibility(view.map), scaleSnap=new Map(), opSnap=new Map();
+
+      try{
+        return await withReportView(async ()=>{
+          walkAny(view.map,(n,underDNT)=>{ if(!("visible"in n)) return; if(n===selLayer){try{n.visible=true;}catch{}; return;} if(underDNT){try{n.visible=true;}catch{}; return;} try{n.visible=false;}catch{} });
+          try{ selLayer.visible=true; }catch{}
+
+          for(const n of present){
+            for(const a of [n,...ancestors(n)]){
+              if(!("visible"in a)) continue;
+              try{ a.visible=true; }catch{}
+              if("minScale"in a || "maxScale"in a){
+                if(!scaleSnap.has(a)) scaleSnap.set(a,{min:a.minScale,max:a.maxScale});
+                try{ a.minScale=0; a.maxScale=0; }catch{}
+              }
+            }
+            const desiredOpacity = forceAllVisible ? 1.0 : 0.8;
+            if("opacity"in n){ if(!opSnap.has(n)) opSnap.set(n,n.opacity); try{ n.opacity=desiredOpacity; }catch{} }
+          }
+          await awaitRenderFor(present);
+
+          const shot=await view.takeScreenshot({format:"png",quality:95});
+
+          let legendGeom=lotGeom;
+          if(!legendOnLot){ try{ const onScr=geometryEngine.intersect(lotGeom,reportExtent||view.extent); if(onScr) legendGeom=onScr; }catch{} }
+
+          const legendParts=[];
+          for(const n of present){
+            const {items}=await legendFromRendererUsingFeatures(n,legendGeom);
+            if(items.length){
+              const inner=items.map(i=>`<div class="row">${i.swatchHTML}${i.label.replace(/&/g,"&amp;")}</div>`).join("");
+              legendParts.push(`<div style="margin-bottom:6px"><b>${(n.title||"Layer").replace(/&/g,"&amp;")}</b><div class="leg" style="margin-top:4px">${inner}</div></div>`);
+            }
+          }
+
+          const count=await sumCounts(present,lotGeom);
+          return {title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,legendHTML:legendParts.join(""),count};
+        });
+      } finally {
+        for(const [n,op] of opSnap){ try{n.opacity=op;}catch{} }
+        for(const [n,sc] of scaleSnap){ try{n.minScale=sc.min;n.maxScale=sc.max;}catch{} }
+        restoreVisibility(view.map,visSnap);
+      }
+    }
+
+    /* Build report */
+    $("btnPrintReport").addEventListener("click", async ()=>{
+      showRptOverlay(true);
+      try{
+        await buildAndOpenReport();
+      } finally {
+        showRptOverlay(false);
+      }
+    });
+
+    async function buildAndOpenReport(){
+      try{
+        showLoading(true);
+
+        setRpt("Locating parcel…", 12);
+        let geom=null, lotText="--", areaText=`-- ${M2}`, classText="--", addressText="--", councilText="Scenic Rim Regional Council";
+        if(lastParcelInfo.feature){
+          geom=lastParcelInfo.feature.geometry;
+          ({lotText,areaText,classText,addressText,councilText}=lastParcelInfo);
+        }else{
+          const probe=await findParcelAtPoint(view.center);
+          if(probe){
+            const info=parcelInfoFromFeature(probe);
+            geom=probe.geometry;
+            ({lotText,areaText,classText,addressText,councilText}=info);
+            lastParcelInfo={feature:probe,...info};
+          }
+        }
+        setRpt("Parcel located", 18, "rptS1");
+
+        reportExtent = computeReportExtent(geom);
+
+        if(geom){
+          setRpt("Resolving address…", 25);
+          try{ addressText = await resolveBestAddress(geom, lastParcelInfo.feature); }catch{}
+          setRpt("Address resolved", 35, "rptS2");
+        }
+
+        setRpt("Rendering base map…", 42);
+        const baseShot = geom
+          ? await withReportView(async()=>{ try{selLayer.visible=true;}catch{}; await waitViewIdle(150); return await view.takeScreenshot({format:"png",quality:95}); })
+          : await view.takeScreenshot({format:"png",quality:95});
+
+        setRpt("Collecting overlays…", 55);
+        const cats = geom ? await intersectingNodesByCategory(geom) : {zoning:[],bushfire:[],utilities:[],acid:[],transport:[],air:[],noise:[],others:[]};
+
+        const shots=[];
+        const tasks=[
+          ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); }}],
+          ["Bushfire", async()=>{ if(cats.bushfire.length){ const s=await screenshotFor(cats.bushfire,"Bushfire",geom); if(s) shots.push(s); }}],
+          ["Utilities", async()=>{ const allUtils = collectAllUtilitiesNodes(); if(allUtils.length){ const s = await screenshotFor(allUtils, "Utilities", geom, false, {forceAllVisible:true}); if(s) shots.push(s); }}],
+          ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
+          ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
+          ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
+          ["Noise / Acoustic", async()=>{ if(cats.noise.length){ const s=await screenshotFor(cats.noise,"Noise / Acoustic",geom); if(s) shots.push(s); }}],
+          ["Other overlays", async()=>{ for(const n of cats.others){ const s=await screenshotFor([n],n.title||"Overlay",geom); if(s) shots.push(s); } }]
+        ];
+        for(let i=0;i<tasks.length;i++){
+          const [name,fn]=tasks[i];
+          setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
+          await fn();
+        }
+        setRpt("Overlays rendered", 87, "rptS3");
+
+        setRpt("Composing document…", 93);
+        const now=new Date();
+        const fmt=d=> d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+        const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+        const logoSrc="./images/Flavour icon.png";
+
+        const html=[];
+        html.push("<!doctype html><meta charset='utf-8'><title>Preliminary Report — Scenic Rim Interactive Mapping</title>");
+        html.push("<style>",
+          "body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px;color:#222;background:#f6f7f9}",
+          ".card{border:1px solid #e1e3e6;border-radius:12px;padding:14px;margin:10px 0;background:#fff;box-shadow:0 2px 10px rgba(16,21,28,.05)}",
+          ".brandbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:-14px -14px 14px -14px;color:#fff;background:linear-gradient(90deg,#a70b13,#7f0e15);border-radius:12px 12px 0 0}",
+          ".brandbar img{width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.6);background:#fff}",
+          ".brandbar h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}",
+          ".brandbar .muted{margin-left:auto;opacity:.95;font-weight:600}",
+          ".rpt-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:18px}",
+          ".propmap{grid-column:1 / -1}",
+          ".propmap-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;align-items:start}",
+          ".badge-pill{display:inline-block;border:1px solid #dadde2;border-radius:999px;padding:4px 10px;margin:4px 6px 0 0;background:#fafbfc}",
+          ".kv{margin-top:8px;font-size:14px;color:#333}.kv div{margin:4px 0}",
+          "img.map{max-width:100%;border:1px solid #e6e8ec;border-radius:10px}",
+          ".section-title{margin:0 0 10px;font-size:18px}",
+          ".overlay-header{display:flex;align-items:center;justify-content:space-between;gap:8px}",
+          ".backbtn{display:inline-block;border:1px solid #d7d7d7;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;text-decoration:none;background:#f7f7f7}.backbtn:hover{background:#eee}",
+          ".sumlist{margin:6px 0 0 18px;padding:0}.sumlist li{margin:8px 0 12px}",
+          ".leg{font-size:13px;line-height:1.35;margin-top:8px}.leg .row{display:flex;align-items:center;gap:8px;margin:2px 0}",
+          ".leg .swbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;padding:1px;border:1px solid #999;border-radius:3px;overflow:hidden;background:#fff}",
+          ".leg .swbox img,.leg .swbox canvas,.leg .swbox svg{width:100%;height:100%;display:block;object-fit:contain}",
+          ".rpt-footer{margin-top:14px;padding-top:8px;border-top:1px dashed #ddd;font-size:12px;color:#555}",
+          "@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.card{page-break-inside:avoid}}",
+          "</style>");
+        html.push("<body>");
+        html.push("<div class='card brandbar'><img src='",logoSrc,"' alt='Logo'><h1>Scenic Rim Interactive Mapping — Preliminary Report</h1><div class='muted'>",fmt(now),"</div></div>");
+
+        html.push("<div class='rpt-grid'>");
+        html.push("<div class='card propmap'>",
+                    "<div class='propmap-grid'>",
+                      "<div>",
+                        "<h2 class='section-title'>Property</h2>",
+                        "<div class='badge-pill'>Lot: ",esc(lotText),"</div>",
+                        "<div class='badge-pill'>Area: ",esc(areaText),"</div>",
+                        "<div class='badge-pill'>Class: ",esc(classText),"</div>",
+                        "<div class='kv'>",
+                          "<div><b>Address:</b> ",esc(addressText),"</div>",
+                          "<div><b>Council:</b> ",esc(councilText),"</div>",
+                        "</div>",
+                        "<div id='summary' style='margin-top:14px'>",
+                          "<h2 class='section-title' style='margin-top:0'>Summary</h2>");
+                          if(shots.length){
+                            html.push("<ul class='sumlist'>");
+                            for(const s of shots){
+                              const ct=(s.count!=null)?` (${s.count} feature${s.count===1?"":"s"})`:"";
+                              html.push(`<li><a class='sum-link' style='color:#7a0f16;font-weight:700;text-decoration:none' href='#${s.id}'>${esc(s.title)}</a>${ct}</li>`);
+                            }
+                            html.push("</ul>");
+                          }else{
+                            html.push("<i>No overlays intersect this parcel (excluding DNT groups).</i>");
+                          }
+                        html.push("</div>",
+                      "</div>",
+                      "<div><h2 class='section-title'>Map</h2><img class='map' src='",baseShot.dataUrl,"' alt='Map'></div>",
+                    "</div>",
+                    "<div class='rpt-footer'>Generated by Scenic Rim Interactive Mapping. Confirm against the current planning scheme and authoritative datasets before relying on this report.</div>",
+                  "</div>");
+        html.push("</div>"); // end rpt-grid
+
+        for(const s of shots){
+          html.push("<div class='card' id='",s.id,"'>",
+            "<div class='overlay-header'><h2 class='section-title' style='margin:0'>",esc(s.title),"</h2><a class='backbtn' href='#summary'>Back to Summary ↑</a></div>",
+            "<img class='map' src='",s.dataUrl,"' alt='",esc(s.title),"'>",
+            "<div class='leg'>", s.legendHTML || "", "</div>",
+          "</div>");
+        }
+
+        html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>© Scenic Rim Regional Council — Scenic Rim Interactive Mapping. Indicative only.</div>");
+        html.push("</body>");
+
+        const w = window.open("about:blank","_blank");
+        if(w){ w.document.open(); w.document.write(html.join("")); w.document.close(); setTimeout(()=>{ try{ w.focus(); w.print(); }catch{} }, 350); }
+        setRpt("Done", 100, "rptS4");
+      }catch(e){ console.error(e); alert("Could not create report."); }
+      finally{ showLoading(false); }
+    }
+
+    /* Tabs & Home */
+    [["summary"],["setbacks"],["proposal"],["yield"]].forEach(([name])=>{
+      const t=$("tab-"+name), p=$("panel-"+name);
+      if(!t||!p) return;
+      t.addEventListener("click",()=>{
+        document.querySelectorAll(".tab").forEach(el=> el.setAttribute("aria-selected","false"));
+        document.querySelectorAll(".panel").forEach(el=> el.classList.remove("active"));
+        t.setAttribute("aria-selected","true"); p.classList.add("active");
+      });
+    });
+    $("btnHome").addEventListener("click",()=>{
+      fetch("Index.html",{method:"HEAD"})
+        .then(()=>{ window.location.href="Index.html"; })
+        .catch(()=>{ history.length>1 ? history.back() : (window.location.href="./"); });
+    });
+  </script>
+  <!-- Auth heartbeat -->
+  <script type="module">
+    import { startSessionHeartbeat, onAuthChange, updateUserChip } from './Js/auth.js';
+
+    const applyUserState = (user) => {
+      document.querySelectorAll('[data-user-email]').forEach((el) => {
+        el.textContent = user && user.email ? user.email : 'Guest';
+      });
+      updateUserChip(user || null);
+    };
+
+    updateUserChip(null);
+    onAuthChange(applyUserState);
+    startSessionHeartbeat();
+  </script>
+
+</body>
+</html>

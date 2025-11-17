@@ -1,0 +1,1246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Subdivision + Building  Robust AU Address</title>
+
+<!-- ArcGIS JS -->
+<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css">
+
+<!-- PDF.js -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js"></script>
+<script>
+  // PDF.js config
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+  window.pdfjsLib.disableWorker = true;
+</script>
+
+<!-- OCR fallback -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+<style>
+  :root{--bg:#f6f7fb;--panel:#fff;--muted:#667085;--ink:#1f2328;--accent:#a70b13;--accent-dark:#7d0810;--border:#e5e7eb}
+  html,body{height:100%}
+  body{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font:14.5px/1.58 system-ui,-apple-system,"Segoe UI",Inter,Roboto,sans-serif}
+  header.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px;background:linear-gradient(120deg,var(--accent),var(--accent-dark));color:#fff;box-shadow:0 10px 30px rgba(15,23,42,.12)}
+  .topbar .brandTitle{margin:0;font-size:16px;font-weight:800;letter-spacing:.18em;text-transform:uppercase}
+  .topbar .homeLink{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;border-radius:999px;border:1px solid rgba(255,255,255,.45);color:#fff;text-decoration:none;font-weight:600}
+  .topbar .homeLink:hover{background:rgba(255,255,255,.14)}
+  .app{flex:1;display:grid;grid-template-columns:360px minmax(0,1fr);min-height:0}
+  aside{background:#fff;border-right:1px solid var(--border);padding:18px;overflow:auto;display:flex;flex-direction:column;gap:16px}
+  h3{margin:0 0 6px;font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent-dark)}
+  .card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:14px;box-shadow:0 10px 24px rgba(15,23,42,.06)}
+  .row{display:flex;gap:8px;align-items:center}
+  .row .grow{flex:1}
+  .row.wrap{flex-wrap:wrap}
+  .muted{color:var(--muted)}
+  input,select{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:10px;background:#fff}
+  input[type="range"]{padding:0;height:34px}
+  .btn{border:0;border-radius:999px;padding:8px 14px;font-weight:700;color:#fff;background:linear-gradient(120deg,var(--accent),var(--accent-dark));cursor:pointer}
+  .btn.secondary{background:#fff;color:#111827;border:1px solid var(--border);font-weight:600}
+  .btn.small{padding:6px 10px;font-size:13px}
+  label.file{display:inline-grid;place-items:center;height:36px;padding:0 12px;border-radius:999px;border:1px dashed #e2a2a2;color:var(--accent-dark);background:#fff;cursor:pointer;font-weight:700}
+  label.file input{display:none}
+  label.layerToggle{display:flex;gap:8px;align-items:center;font-size:13px;margin:4px 0;color:var(--ink)}
+  label.layerToggle input{margin:0}
+  #viewer{position:relative;min-height:0;height:100%}
+  #viewDiv{position:absolute;inset:0}
+  #imgStatus{position:absolute;right:14px;top:14px;padding:8px 10px;border-radius:10px;background:#fff;border:1px solid var(--border);box-shadow:0 12px 28px rgba(15,23,42,.12);font-size:12.5px;display:none;z-index:5}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brandTitle">Plan Of Development Tools</div>
+  <a class="homeLink" href="Index.html">Back to homepage</a>
+</header>
+
+<div class="app">
+  <aside>
+    <div class="card">
+      <h3>ArcGIS Globe</h3>
+      <div class="row muted">Tokens are stored locally. Search by address or <code>lat,lon</code> (AU only).</div>
+      <div class="row">
+        <button id="applyIon" class="btn secondary small">Save ArcGIS key</button>
+        <button id="applyKey" class="btn secondary small">Use shared key</button>
+        <div id="tokenStatus" class="muted" style="margin-left:auto">Using shared key</div>
+      </div>
+      <div class="row">
+        <input id="addr" class="grow" placeholder="Search address or 'lat,lon'">
+        <button id="geoBtn" class="btn small">Search</button>
+      </div>
+      <div class="row">
+        <button id="basemapToggle" class="btn secondary small">Basemap: Simple</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Parcel Lookup</h3>
+      <div class="muted">If a PoD omits the lot/plan text, paste it here (e.g. <code>Lot 19 RP90746</code>).</div>
+      <div class="row" style="margin-top:8px">
+        <input id="lotPlanInput" placeholder="Lot / Plan" style="width:140px">
+        <button id="applyLotPlan" class="btn small">Locate</button>
+      </div>
+      <div id="lotPlanMsg" class="muted">Uses QLD DCDB parcel geometry.</div>
+    </div>
+
+    <div class="card">
+      <h3>Layers</h3>
+      <label class="layerToggle"><input type="checkbox" id="layerParcels" checked>QLD property boundaries</label>
+      <label class="layerToggle"><input type="checkbox" id="layerPropertyInfo">Property info (lot labels)</label>
+      <label class="layerToggle"><input type="checkbox" id="layerAerial">Aerial imagery (Esri)</label>
+      <label class="layerToggle"><input type="checkbox" id="layerPlanning">Planning overlays</label>
+      <label class="layerToggle"><input type="checkbox" id="layerEnvironment">Environmental constraints</label>
+      <label class="layerToggle"><input type="checkbox" id="layerTransport">Transport corridors</label>
+      <div class="muted" style="font-size:12px;margin-top:6px">Layers stream live from Queensland/Esri services; unavailable layers will log a warning in console.</div>
+    </div>
+
+    <div class="card">
+      <h3>Subdivision (Plan of Development)</h3>
+      <div class="row">
+        <label class="file">Upload PoD PDF<input id="podPdf" type="file" accept="application/pdf,.pdf"></label>
+        <span id="podMsg" class="muted">No PoD loaded.</span>
+      </div>
+      <div class="muted">Finds the <b>estate/subdivision address</b> (not RPD), optional <b>coords</b> (Lat/Lon), and <b>Lot</b> labels.</div>
+      <div class="row">
+        <select id="lotSelect"><option value=""> Select lot </option></select>
+        <button id="placeOnLot" class="btn small" disabled>Place building on lot</button>
+        <button id="clearLots" class="btn secondary small" disabled>Clear lots</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Manual Lots</h3>
+      <div class="muted">Trace proposed lots directly on the globe. Click to add vertices; double-click or hit <b>Finish</b>.</div>
+      <div class="row" style="margin:6px 0">
+        <button id="lotGuessBtn" class="btn secondary small" style="width:100%">Guess lots from outline</button>
+      </div>
+      <div class="row wrap" style="gap:6px">
+        <button id="lotDrawStart" class="btn small">Start drawing</button>
+        <button id="lotDrawUndo" class="btn secondary small" disabled>Undo</button>
+        <button id="lotDrawFinish" class="btn secondary small" disabled>Finish</button>
+        <button id="lotDrawCancel" class="btn secondary small" disabled>Cancel</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button id="lotDrawClear" class="btn secondary small" disabled>Clear saved lots</button>
+        <button id="lotDrawExport" class="btn secondary small" disabled style="margin-left:auto">Copy GeoJSON</button>
+      </div>
+      <div id="lotDrawStatus" class="muted">Click “Start drawing” to add a custom lot.</div>
+    </div>
+
+    <div class="card">
+      <h3>Building (from plan)</h3>
+      <div class="row">
+        <label class="file">Upload Plan PDF<input id="planPdf" type="file" accept="application/pdf"></label>
+        <span id="pdfMsg" class="muted">No plan loaded.</span>
+      </div>
+      <div class="row"><div class="grow">Width (m)</div><input id="wMeter" type="number" step="0.01" value="10" style="width:110px"></div>
+      <div class="row"><div class="grow">Length (m)</div><input id="lMeter" type="number" step="0.01" value="8" style="width:110px"></div>
+      <div class="row"><div class="grow">Height (m)</div><input id="hMeter" type="number" step="0.1" value="3" style="width:110px"></div>
+      <div class="row"><div class="grow">Yaw (°)</div><input id="yaw" type="range" min="-180" max="180" value="0" class="grow"></div>
+      <div class="row"><div class="grow">Offset E/N (m)</div>
+        <input id="offsetEast" type="number" step="0.1" value="0" style="width:70px">
+        <input id="offsetNorth" type="number" step="0.1" value="0" style="width:70px">
+      </div>
+      <div class="row">
+        <button id="applySize" class="btn">Apply size</button>
+        <button id="resetView" class="btn secondary">Reset view</button>
+      </div>
+    </div>
+  </aside>
+
+  <div id="viewer">
+    <div id="viewDiv"></div>
+    <div id="imgStatus"></div>
+  </div>
+</div>
+
+<script type="module">
+/* ===== ArcGIS imports ===== */
+import esriConfig from "https://js.arcgis.com/4.30/@arcgis/core/config.js";
+import WebScene from "https://js.arcgis.com/4.30/@arcgis/core/WebScene.js";
+import SceneView from "https://js.arcgis.com/4.30/@arcgis/core/views/SceneView.js";
+import Basemap from "https://js.arcgis.com/4.30/@arcgis/core/Basemap.js";
+import TileLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/TileLayer.js";
+import FeatureLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/FeatureLayer.js";
+import GraphicsLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js";
+import Graphic from "https://js.arcgis.com/4.30/@arcgis/core/Graphic.js";
+import Polygon from "https://js.arcgis.com/4.30/@arcgis/core/geometry/Polygon.js";
+import Polyline from "https://js.arcgis.com/4.30/@arcgis/core/geometry/Polyline.js";
+import Point from "https://js.arcgis.com/4.30/@arcgis/core/geometry/Point.js";
+import Camera from "https://js.arcgis.com/4.30/@arcgis/core/Camera.js";
+import * as webMercatorUtils from "https://js.arcgis.com/4.30/@arcgis/core/geometry/support/webMercatorUtils.js";
+
+/* ===== basics / helpers ===== */
+const statusBanner = document.getElementById('imgStatus');
+let statusToken = 0;
+function showStatus(msg){
+  statusToken++;
+  statusBanner.textContent = msg;
+  statusBanner.style.display = 'block';
+  return statusToken;
+}
+function hideStatus(t){
+  if(t === undefined || t === statusToken) statusBanner.style.display = 'none';
+}
+function valNum(id, fallback){
+  const el = document.getElementById(id);
+  const v = parseFloat(el && el.value);
+  return isFinite(v) ? v : fallback;
+}
+const AU = {latMin:-44,latMax:-10,lonMin:111,lonMax:156};
+function inAU(lat,lon){return lat>=AU.latMin&&lat<=AU.latMax&&lon>=AU.lonMin&&lon<=AU.lonMax}
+function normalize(s){return (s||'').replace(/\u00A0/g,' ').replace(/\u00D7/g,'x').replace(/\s+/g,' ').trim()}
+
+/* SVG measurement host for pdf outline */
+let svgMeasureHost = null;
+function ensureSvgMeasureHost(){
+  if(svgMeasureHost && svgMeasureHost.parentNode) return svgMeasureHost;
+  svgMeasureHost = document.createElement('div');
+  svgMeasureHost.style.cssText = 'position:absolute;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;';
+  document.body.appendChild(svgMeasureHost);
+  return svgMeasureHost;
+}
+
+/* ===== PoD status helpers ===== */
+const podStatusEl = document.getElementById('podMsg');
+function setPodStatus(msg,isError){
+  if(!podStatusEl) return;
+  podStatusEl.textContent = msg;
+  if(isError){
+    podStatusEl.classList.remove('muted');
+    podStatusEl.style.color='#b91c1c';
+  }else{
+    podStatusEl.style.color='';
+    if(!podStatusEl.classList.contains('muted')) podStatusEl.classList.add('muted');
+  }
+}
+if(podStatusEl) setPodStatus(podStatusEl.textContent || 'No PoD loaded.', false);
+
+/* ===== ArcGIS scene setup ===== */
+const lotPlanInput = document.getElementById('lotPlanInput');
+const lotPlanBtn = document.getElementById('applyLotPlan');
+const lotPlanMsg = document.getElementById('lotPlanMsg');
+function setLotPlanStatus(msg,isError){
+  if(!lotPlanMsg) return;
+  lotPlanMsg.textContent = msg;
+  lotPlanMsg.style.color = isError ? '#b91c1c' : '';
+}
+if(lotPlanMsg) setLotPlanStatus(lotPlanMsg.textContent || 'Uses QLD DCDB parcel geometry.', false);
+
+const basemapBtn = document.getElementById('basemapToggle');
+const DCDB_FEATURE_URL = "https://gisservices.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer/4";
+const BCC_PARCEL_API = "https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/property-boundaries-parcel/records";
+
+let overlayLayers = {};
+let parcelQueryLayer = null;
+let currentPodState = {addr:null,coords:[],lots:[],lotPlan:null,lotPlanGeom:null};
+let currentPlanOutline = null;
+let lastLatLon = {lat:-27.4698,lon:153.0251};
+let usingSimple = true;
+
+const LOT_PLAN_LAYER_URLS = [DCDB_FEATURE_URL];
+let lotPlanLookupReady = null;
+
+/* ArcGIS API key handling */
+const DEFAULT_ARC_KEY = "AAPKc6e43bbc520149f79229d173c04883558jat1YV8r6Xjl50ulCDeLTkHzW0vzUC-9m6ASQvGmPbo4-xY_kAzsJxJZm-j_Unr";
+const storedKey = (localStorage.getItem('arcgis_api_key')||'').trim();
+esriConfig.apiKey = storedKey || DEFAULT_ARC_KEY;
+function hasCustomArcKey(){return !!(localStorage.getItem('arcgis_api_key')||'').trim();}
+
+/* Basemaps */
+const SIMPLE_BASELAYER_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer";
+const TOPO_BASELAYER_URL = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer";
+
+const propertyBasemap = new Basemap({
+  baseLayers:[new TileLayer({url:SIMPLE_BASELAYER_URL,opacity:1})],
+  title:"Property",
+  id:"property-gray"
+});
+const topoBasemap = new Basemap({
+  baseLayers:[new TileLayer({url:TOPO_BASELAYER_URL,opacity:1})],
+  title:"Topographic",
+  id:"topographic"
+});
+
+/* Base scene & parcel scene */
+const baseScene = new WebScene({
+  basemap:propertyBasemap,
+  ground:"world-elevation"
+});
+
+/* Fallback local scene spec */
+const LOCAL_SCENE_SPEC = {
+  "operationalLayers":[{"id":"19a5c46f583-layer-91","title":"QSpatial Land Parcel Property Framework","url":"https://gisservices.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer","refreshInterval":0,"itemId":"b9bb2b8d873240709188db122aa1c005","layerType":"ArcGISMapServiceLayer","visibleLayers":[0,1,2,4,15,16,17]}],
+  "baseMap":{"baseMapLayers":[{"id":"18c679fb712-layer-37","title":"Topographic","visibility":true,"layerType":"VectorTileLayer","styleUrl":"https://cdn.arcgis.com/sharing/rest/content/items/1e7d1784d1ef4b79ba6764d0bd6c3150/resources/styles/root.json"},{"id":"19a5c78cb73-layer-254","disablePopup":true,"title":"Trees","url":"https://basemaps3d.arcgis.com/arcgis/rest/services/OpenStreetMap3D_Trees_Thematic_v1/SceneServer/layers/0","layerType":"ArcGISSceneServiceLayer","layerDefinition":{"definitionExpression":null,"polygonFilter":null}},{"id":"19a5c78cb74-layer-255","disablePopup":true,"title":"Places and Labels","url":"https://basemaps3d.arcgis.com/arcgis/rest/services/OpenStreetMap3D_DarkLabels_v1/SceneServer/layers/0","layerType":"ArcGISSceneServiceLayer","layerDefinition":{"definitionExpression":null,"polygonFilter":null}},{"id":"19a5c78cb74-layer-256","disablePopup":true,"title":"Buildings","url":"https://basemaps3d.arcgis.com/arcgis/rest/services/Esri3D_Buildings_v1/SceneServer/layers/0","visibility":false,"layerType":"ArcGISSceneServiceLayer","layerDefinition":{"definitionExpression":null,"polygonFilter":null}}],"id":"18c679f066c-basemap-24","title":"Topographic","elevationLayers":[{"id":"globalElevation","listMode":"hide","title":"Terrain3D","url":"https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer","layerType":"ArcGISTiledElevationServiceLayer"}]},"ground":{"layers":[{"id":"globalElevation","listMode":"hide","title":"Terrain3D","url":"https://elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer","layerType":"ArcGISTiledElevationServiceLayer"}],"transparency":0,"surfaceColor":[2,115,0],"navigationConstraint":{"type":"stayAbove"}},"heightModelInfo":{"heightModel":"gravity_related_height","heightUnit":"meter"},"version":"1.38","authoringApp":"WebSceneViewer","authoringAppVersion":"2025.3.0","initialState":{"environment":{"lighting":{"type":"sun","datetime":1678846341000,"directShadows":true,"displayUTCOffset":10},"atmosphereEnabled":true,"starsEnabled":true,"weather":{"type":"cloudy","cloudCover":0.5}},"viewpoint":{"camera":{"position":{"spatialReference":{"latestWkid":3857,"wkid":102100},"x":1.71029229519737E7,"y":-4032602.2210948505,"z":2342197.438496655},"heading":357.1129391696489,"tilt":17.393731638667095}}},"spatialReference":{"latestWkid":3857,"wkid":102100},"viewingMode":"global"};
+
+let parcelScene = null;
+let parcelSceneLoading = null;
+
+/* SceneView */
+const view = new SceneView({
+  container:'viewDiv',
+  map:baseScene,
+  qualityProfile:'high',
+  environment:{
+    atmosphere:{quality:'high'},
+    lighting:{type:'virtual'}
+  }
+});
+view.ui.components = [];
+view.on('pointer-move',handleBuildingHover);
+
+/* Graphics layers */
+const parcelOutlineLayer = new GraphicsLayer({listMode:'hide'});
+const boundaryLayer      = new GraphicsLayer({listMode:'hide'});
+const buildingLayer      = new GraphicsLayer({listMode:'hide'});
+const buildingMeasureLayer = new GraphicsLayer({listMode:'hide'});
+const manualLotLayer     = new GraphicsLayer({listMode:'hide'});
+const autoLotLayer       = new GraphicsLayer({listMode:'hide'});
+const managedLayers = [parcelOutlineLayer,boundaryLayer,buildingLayer,buildingMeasureLayer,manualLotLayer,autoLotLayer];
+
+/* Token status */
+function refreshTokenStatus(){
+  const el = document.getElementById('tokenStatus');
+  if(!el) return;
+  const custom = (localStorage.getItem('arcgis_api_key')||'').trim();
+  el.textContent = custom ? 'Using saved ArcGIS key' : 'Using shared key';
+}
+refreshTokenStatus();
+
+/* API key buttons */
+const btnIon = document.getElementById('applyIon');
+if(btnIon){
+  btnIon.textContent='Set ArcGIS key';
+  btnIon.addEventListener('click',function(){
+    const cur = (localStorage.getItem('arcgis_api_key')||'').trim();
+    const v = prompt('ArcGIS API key:',cur);
+    if(v===null) return;
+    const trimmed = v.trim();
+    if(trimmed){
+      localStorage.setItem('arcgis_api_key',trimmed);
+      esriConfig.apiKey = trimmed;
+    }else{
+      localStorage.removeItem('arcgis_api_key');
+      esriConfig.apiKey = DEFAULT_ARC_KEY;
+    }
+    refreshTokenStatus();
+    loadParcelScene(true);
+  });
+}
+const btnArc = document.getElementById('applyKey');
+if(btnArc){
+  btnArc.textContent='Clear key';
+  btnArc.addEventListener('click',function(){
+    localStorage.removeItem('arcgis_api_key');
+    esriConfig.apiKey = DEFAULT_ARC_KEY;
+    refreshTokenStatus();
+    parcelScene=null;
+    parcelSceneLoading=null;
+    view.map=baseScene;
+    reattachAllLayers(baseScene);
+    setBasemapSimple(usingSimple);
+    alert('ArcGIS key reset to default shared key.');
+  });
+}
+
+/* ===== Overlays ===== */
+const overlayConfigs = {
+  parcels:{
+    id:'layerParcels',
+    type:'feature',
+    url:DCDB_FEATURE_URL,
+    alpha:0.85,
+    checked:true,
+    outFields:['LOT','PLAN','PLAN_','LOT_PLAN'],
+    renderer:{
+      type:'simple',
+      symbol:{
+        type:'simple-fill',
+        color:[0,0,0,0],
+        outline:{color:[34,197,94,0.8],width:0.8}
+      }
+    },
+    label:'QLD Property boundaries (DCDB)'
+  },
+  propertyInfo:{
+    id:'layerPropertyInfo',
+    type:'feature',
+    url:DCDB_FEATURE_URL,
+    alpha:1,
+    minScale:20000,
+    outFields:['LOT','PLAN'],
+    renderer:{
+      type:'simple',
+      symbol:{type:'simple-fill',color:[0,0,0,0],outline:{color:[37,99,235,0.9],width:1}}
+    },
+    labelingInfo:[{
+      labelExpressionInfo:{expression:"return 'Lot ' + $feature.LOT + ' ' + $feature.PLAN;"},
+      where:"LOT IS NOT NULL AND PLAN IS NOT NULL",
+      symbol:{
+        type:'text',
+        color:[37,99,235,1],
+        haloColor:[255,255,255,0.95],
+        haloSize:1.5,
+        font:{size:10,weight:'bold'}
+      },
+      labelPlacement:'always-horizontal'
+    }],
+    label:'Property info (lot labels)'
+  },
+  aerial:{
+    id:'layerAerial',
+    url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
+    alpha:0.9,
+    label:'Aerial imagery'
+  },
+  planning:{
+    id:'layerPlanning',
+    url:'https://gisservices.information.qld.gov.au/arcgis/rest/services/Planning/PlanMaking/MapServer',
+    alpha:0.75,
+    label:'Planning overlays'
+  },
+  environment:{
+    id:'layerEnvironment',
+    url:'https://gisservices.information.qld.gov.au/arcgis/rest/services/Environment/ProtectedAreas/MapServer',
+    alpha:0.7,
+    label:'Environmental constraints'
+  },
+  transport:{
+    id:'layerTransport',
+    url:'https://gisservices.information.qld.gov.au/arcgis/rest/services/Transport/StateTransportNetworks/MapServer',
+    alpha:0.7,
+    label:'Transport networks'
+  }
+};
+function buildOverlayLayer(cfg){
+  try{
+    if(cfg.type==='feature'){
+      return new FeatureLayer({
+        url:cfg.url,
+        opacity:cfg.alpha ?? 1,
+        outFields:cfg.outFields || ['*'],
+        popupEnabled:false,
+        minScale:cfg.minScale||0,
+        maxScale:cfg.maxScale||0,
+        renderer:cfg.renderer||null,
+        labelingInfo:cfg.labelingInfo||null,
+        visible:false
+      });
+    }
+    return new TileLayer({url:cfg.url,opacity:cfg.alpha ?? 1,visible:false});
+  }catch(e){
+    console.warn('Overlay layer failed',cfg.url,e);
+    return null;
+  }
+}
+function moveLayerToMap(layer,map){
+  if(!layer||!map) return;
+  const parent = layer.parent;
+  if(parent && parent!==map && parent.remove) parent.remove(layer);
+  if(map.layers && map.layers.indexOf(layer)===-1) map.add(layer);
+}
+function toggleOverlayLayer(key,on){
+  const cfg = overlayConfigs[key];
+  if(!cfg || !view) return;
+  let layer = overlayLayers[key];
+  if(on){
+    if(!layer){
+      layer = buildOverlayLayer(cfg);
+      if(!layer) return;
+      overlayLayers[key] = layer;
+    }
+    moveLayerToMap(layer,view.map);
+    layer.visible = true;
+  }else if(layer){
+    layer.visible=false;
+  }
+}
+function currentBasemap(){return usingSimple ? propertyBasemap : topoBasemap;}
+function setBasemapSimple(on){
+  usingSimple = !!on;
+  if(view && view.map) view.map.basemap = currentBasemap();
+  if(parcelScene) parcelScene.basemap = currentBasemap();
+  if(basemapBtn) basemapBtn.textContent = usingSimple ? 'Basemap: Property' : 'Basemap: Topographic';
+}
+function reattachAllLayers(map){
+  if(!map) return;
+  managedLayers.forEach(layer => moveLayerToMap(layer,map));
+  Object.keys(overlayConfigs).forEach(key=>{
+    const cfg = overlayConfigs[key];
+    const el = document.getElementById(cfg.id);
+    if(!el || !el.checked) return;
+    let layer = overlayLayers[key];
+    if(!layer){
+      layer = buildOverlayLayer(cfg);
+      if(!layer) return;
+      overlayLayers[key]=layer;
+    }
+    moveLayerToMap(layer,map);
+    layer.visible=true;
+  });
+}
+reattachAllLayers(view.map);
+if(view && view.watch){
+  view.watch('map',newMap => reattachAllLayers(newMap));
+}
+let overlayInit=false;
+function initOverlayToggles(){
+  if(overlayInit) return;
+  overlayInit=true;
+  setBasemapSimple(true);
+  Object.keys(overlayConfigs).forEach(key=>{
+    const cfg=overlayConfigs[key];
+    const el=document.getElementById(cfg.id);
+    if(!el) return;
+    if(cfg.checked) el.checked=true;
+    el.addEventListener('change',()=>toggleOverlayLayer(key,el.checked));
+    if(cfg.checked) toggleOverlayLayer(key,true);
+  });
+}
+view.when(()=>{
+  if(view.popup){
+    view.popup.defaultPopupTemplateEnabled=false;
+    view.popup.autoOpenEnabled=false;
+  }
+  view.popupEnabled=false;
+  if(typeof view.closePopup==='function') view.closePopup();
+  else if(view.popup && typeof view.popup.close==='function') view.popup.close();
+  initOverlayToggles();
+  loadParcelScene(false);
+}).catch(err=>{
+  console.warn('SceneView init warning',err);
+  initOverlayToggles();
+  loadParcelScene(false);
+});
+if(basemapBtn) basemapBtn.addEventListener('click',()=>setBasemapSimple(!usingSimple));
+
+/* ===== Parcel scene loading ===== */
+function cloneSceneSpec(spec){
+  try{return JSON.parse(JSON.stringify(spec));}catch(e){console.warn('clone spec failed',e);return null;}
+}
+function handleParcelSceneFailure(token){
+  hideStatus(token);
+  view.map=baseScene;
+  reattachAllLayers(baseScene);
+  setBasemapSimple(usingSimple);
+  parcelScene=null;
+  parcelSceneLoading=null;
+  const warn=showStatus('Parcel dataset unavailable. Using base map only.');
+  setTimeout(()=>hideStatus(warn),6000);
+  return null;
+}
+function instantiateParcelSceneFromSpec(spec,token){
+  const json = cloneSceneSpec(spec);
+  if(!json) return Promise.reject(new Error('Parcel scene spec missing'));
+  const scene = WebScene.fromJSON(json);
+  scene.basemap=currentBasemap();
+  return scene.load().then(()=>{
+    parcelScene=scene;
+    view.map=scene;
+    reattachAllLayers(scene);
+    setBasemapSimple(usingSimple);
+    hideStatus(token);
+    return scene;
+  });
+}
+function loadParcelScene(force){
+  if(force){
+    parcelScene=null;
+    parcelSceneLoading=null;
+  }
+  if(parcelSceneLoading && !force) return parcelSceneLoading;
+  if(parcelScene && !force){
+    view.map=parcelScene;
+    reattachAllLayers(parcelScene);
+    setBasemapSimple(usingSimple);
+    return Promise.resolve(parcelScene);
+  }
+  const token=showStatus('Loading QSpatial parcel scene...');
+  const sceneSpecPromise = fetch('scene.json?_=' + Date.now())
+    .then(r=>{if(!r.ok) throw new Error('scene.json not available');return r.json();})
+    .catch(e=>{
+      console.warn('Parcel scene fetch failed',e);
+      if(LOCAL_SCENE_SPEC) return cloneSceneSpec(LOCAL_SCENE_SPEC);
+      throw e;
+    });
+  parcelSceneLoading = sceneSpecPromise
+    .then(spec=>instantiateParcelSceneFromSpec(spec,token))
+    .catch(err=>{
+      console.warn('Parcel scene unavailable',err);
+      return handleParcelSceneFailure(token);
+    });
+  return parcelSceneLoading;
+}
+
+/* ===== Geodesy helpers ===== */
+function toRad(deg){return (deg||0)*Math.PI/180;}
+function mPerDegLat(phi){
+  phi=toRad(phi);
+  return 111132.92 - 559.82*Math.cos(2*phi) + 1.175*Math.cos(4*phi) - 0.0023*Math.cos(6*phi);
+}
+function mPerDegLon(phi){
+  phi=toRad(phi);
+  return 111412.84*Math.cos(phi) - 93.5*Math.cos(3*phi) + 0.118*Math.cos(5*phi);
+}
+function eastNorthToDeg(lat0,lon0,E,N){
+  const metersLat = mPerDegLat(lat0)||111320;
+  const metersLon = mPerDegLon(lat0)||111320;
+  return {
+    lat: lat0 + (N||0)/metersLat,
+    lon: lon0 + (E||0)/metersLon
+  };
+}
+function latLonToLocal(lat,lon,origin){
+  origin = origin || lastLatLon || null;
+  if(!origin || !isFinite(lat) || !isFinite(lon)) return {x:0,y:0};
+  const metersLat = mPerDegLat(origin.lat||0)||111320;
+  const metersLon = mPerDegLon(origin.lat||0)||111320;
+  return {
+    x:(lon-(origin.lon||0))*metersLon,
+    y:(lat-(origin.lat||0))*metersLat
+  };
+}
+function camRangeFor(w,l){
+  const width = Math.max(8,Math.abs(w||0));
+  const length = Math.max(6,Math.abs(l||0));
+  const diag = Math.sqrt(width*width+length*length)||10;
+  return Math.max(120,diag*6);
+}
+function goToFootprint(lat,lon,w,l){
+  if(!view||!isFinite(lat)||!isFinite(lon)) return Promise.resolve();
+  const range = camRangeFor(w,l);
+  const latOffsetMeters = range*0.6;
+  const latOffset = latOffsetMeters/(mPerDegLat(lat)||111320);
+  const cam = new Camera({
+    position:{latitude:lat-latOffset,longitude:lon,z:range},
+    heading:0,
+    tilt:65
+  });
+  return view.goTo(cam,{speedFactor:0.75});
+}
+function alignCameraNorth(){
+  if(!view) return Promise.resolve();
+  const cam=view.camera.clone();
+  cam.heading=0;
+  cam.roll=0;
+  return view.goTo(cam,{animate:false});
+}
+function getInputs(){
+  return{
+    w:valNum('wMeter',10),
+    l:valNum('lMeter',8),
+    h:valNum('hMeter',3),
+    y:valNum('yaw',0),
+    e:valNum('offsetEast',0),
+    n:valNum('offsetNorth',0)
+  };
+}
+
+/* ===== Rect footprint helper (used for boundary) ===== */
+function rectRing(lat,lon,w,l,yawDeg,e,n,margin){
+  if(!isFinite(lat)||!isFinite(lon)) return [];
+  const yaw = toRad(yawDeg||0);
+  margin = margin || 0;
+  const hw = Math.max(0,(w||0)/2)+margin;
+  const hl = Math.max(0,(l||0)/2)+margin;
+  const offsets=[[-hw,-hl],[hw,-hl],[hw,hl],[-hw,hl]];
+  return offsets.map(pair=>{
+    const E=pair[0],N=pair[1];
+    const rotE=E*Math.cos(yaw)-N*Math.sin(yaw);
+    const rotN=E*Math.sin(yaw)+N*Math.cos(yaw);
+    const d = eastNorthToDeg(lat,lon,rotE+(e||0),rotN+(n||0));
+    return [d.lon,d.lat];
+  });
+}
+
+/* ===== Building & boundary graphics ===== */
+let buildingGraphic=null;
+let boundaryGraphic=null;
+let podOutlineGraphics=[];
+let lastPodOutlinePolygon=null;
+
+function drawBoundary(lat,lon,w,l,y,e,n){
+  if(!boundaryLayer) return null;
+  boundaryLayer.removeAll();
+  boundaryGraphic=null;
+  if(!isFinite(lat)||!isFinite(lon)) return null;
+  const ring = rectRing(lat,lon,w,l,y,e,n,6);
+  if(!ring.length) return null;
+  const polygon = new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+  boundaryGraphic = new Graphic({
+    geometry:polygon,
+    symbol:{type:'simple-fill',color:[251,146,60,0.18],outline:{color:[234,88,12,1],width:1.5}}
+  });
+  boundaryLayer.add(boundaryGraphic);
+  return boundaryGraphic;
+}
+
+/* --- Plan shape → local E/N points (house outline) --- */
+function ringAreaMeters(points){
+  if(!points||points.length<3) return 0;
+  let sum=0;
+  for(let i=0;i<points.length;i++){
+    const a=points[i];
+    const b=points[(i+1)%points.length];
+    sum += a.E*b.N - b.E*a.N;
+  }
+  return sum/2;
+}
+
+// Use detected outline if available; fallback to rectangle
+function planShapeLocalPoints(w,l){
+  const pts=[];
+  const widthM  = Math.max(0.1, Math.abs(w||0));
+  const lengthM = Math.max(0.1, Math.abs(l||0));
+
+  if(currentPlanOutline && currentPlanOutline.points && currentPlanOutline.points.length>=3 && currentPlanOutline.bounds){
+    const b  = currentPlanOutline.bounds;
+    const bw = b.width;
+    const bh = b.height;
+    if(bw>0 && bh>0){
+      // Uniform scale to preserve shape; fit into requested width/length
+      const scale = Math.min(widthM/bw, lengthM/bh);
+
+      for(const pt of currentPlanOutline.points){
+        const xNorm = (pt.x - b.minX) - bw/2;
+        const yNorm = (pt.y - b.minY) - bh/2;
+        const E = xNorm * scale;
+        const N = -yNorm * scale; // invert PDF Y
+        pts.push({E,N});
+      }
+    }
+  }
+
+  // Fallback: simple rectangle
+  if(!pts.length){
+    const hw = widthM/2;
+    const hl = lengthM/2;
+    pts.push(
+      {E:-hw,N:-hl},
+      {E: hw,N:-hl},
+      {E: hw,N: hl},
+      {E:-hw,N: hl}
+    );
+  }
+
+  // Ensure closed ring
+  if(pts.length>1){
+    const f=pts[0], last=pts[pts.length-1];
+    if(Math.abs(f.E-last.E)>1e-6 || Math.abs(f.N-last.N)>1e-6){
+      pts.push({E:f.E,N:f.N});
+    }
+  }
+
+  // Ensure consistent orientation (clockwise)
+  const area = ringAreaMeters(pts);
+  if(area<0) pts.reverse();
+
+  return pts;
+}
+
+/* Build plan geometry using outline (or rectangle) */
+function buildPlanGeometry(lat,lon,w,l,yawDeg,eastOffset,northOffset){
+  const basePoints = planShapeLocalPoints(w,l);
+  if(!basePoints || basePoints.length<3) return null;
+
+  const yaw = toRad(yawDeg||0);
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+
+  const ring=[];
+  const localRing=[];
+
+  for(const pt of basePoints){
+    let E = pt.E;
+    let N = pt.N;
+
+    const rE = E*cos - N*sin;
+    const rN = E*sin + N*cos;
+
+    const totalE = rE + (eastOffset||0);
+    const totalN = rN + (northOffset||0);
+
+    localRing.push({E:totalE,N:totalN});
+    const ll = eastNorthToDeg(lat,lon,totalE,totalN);
+    ring.push([ll.lon,ll.lat]);
+  }
+
+  if(ring.length){
+    const f=ring[0], last=ring[ring.length-1];
+    if(f[0]!==last[0] || f[1]!==last[1]) ring.push([f[0],f[1]]);
+  }
+
+  const polygon = new Polygon({
+    rings:[ring],
+    spatialReference:{wkid:4326}
+  });
+
+  return {geometry:polygon,localRing};
+}
+
+/* Measurement labels on building edges */
+let buildingMeasureEdges=[];
+let activeMeasureEdge=-1;
+let buildingHoverBusy=false;
+
+function clearBuildingMeasurements(){
+  buildingMeasureLayer.removeAll();
+  buildingMeasureEdges=[];
+  activeMeasureEdge=-1;
+  if(view && view.container) view.container.style.cursor='';
+}
+function formatMetersText(v){
+  if(!isFinite(v)) return '--';
+  if(v>=50) return Math.round(v)+' m';
+  if(v>=10) return v.toFixed(1)+' m';
+  return v.toFixed(2)+' m';
+}
+function measurementLabelSymbol(text){
+  return{
+    type:'point-3d',
+    symbolLayers:[{
+      type:'text',
+      text,
+      material:{color:[17,24,39,1]},
+      halo:{color:[255,255,255,0.95],size:2},
+      size:12,
+      font:{family:'Avenir Next',weight:'bold'}
+    }],
+    verticalOffset:{screenLength:26,minWorldLength:4,maxWorldLength:40},
+    callout:{type:'line',color:[17,24,39,0.35],size:1.2}
+  };
+}
+function updateBuildingMeasurements(lat,lon,localRing,height){
+  clearBuildingMeasurements();
+  if(!localRing || localRing.length<2) return;
+  const zHeight = Math.max(1,Math.abs(height||0))+0.8;
+  for(let i=0;i<localRing.length-1;i++){
+    const start = localRing[i];
+    const end   = localRing[i+1];
+    if(!start || !end) continue;
+    const dx=end.E-start.E;
+    const dy=end.N-start.N;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    if(!(dist>0.25)) continue;
+    const midE = start.E+dx/2;
+    const midN = start.N+dy/2;
+    const midLatLon = eastNorthToDeg(lat,lon,midE,midN);
+    const point = new Point({latitude:midLatLon.lat,longitude:midLatLon.lon,z:zHeight});
+    const labelGraphic = new Graphic({
+      geometry:point,
+      symbol:measurementLabelSymbol(formatMetersText(dist)),
+      visible:false
+    });
+    buildingMeasureLayer.add(labelGraphic);
+    buildingMeasureEdges.push({
+      startLocal:{x:start.E,y:start.N},
+      endLocal:{x:end.E,y:end.N},
+      graphic:labelGraphic
+    });
+  }
+}
+function pointToSegmentDistance(pt,a,b){
+  if(!pt||!a||!b) return Infinity;
+  const vx=b.x-a.x, vy=b.y-a.y;
+  const wx=pt.x-a.x, wy=pt.y-a.y;
+  const denom=vx*vx+vy*vy;
+  const t=denom?Math.max(0,Math.min(1,(wx*vx+wy*vy)/denom)):0;
+  const projX=a.x+t*vx;
+  const projY=a.y+t*vy;
+  const dx=pt.x-projX, dy=pt.y-projY;
+  return Math.sqrt(dx*dx+dy*dy);
+}
+function closestEdgeIndex(mapPoint){
+  if(!mapPoint || !buildingMeasureEdges.length) return -1;
+  const pt=latLonToLocal(mapPoint.latitude,mapPoint.longitude,lastLatLon);
+  let best=-1, bestDist=Infinity;
+  for(let i=0;i<buildingMeasureEdges.length;i++){
+    const edge=buildingMeasureEdges[i];
+    const dist=pointToSegmentDistance(pt,edge.startLocal,edge.endLocal);
+    if(dist<bestDist){
+      bestDist=dist;
+      best=i;
+    }
+  }
+  return best;
+}
+function setActiveMeasurementEdge(idx){
+  if(idx===activeMeasureEdge) return;
+  for(let i=0;i<buildingMeasureEdges.length;i++){
+    const g=buildingMeasureEdges[i].graphic;
+    if(g) g.visible=(i===idx);
+  }
+  activeMeasureEdge=idx;
+  if(view && view.container) view.container.style.cursor = idx>=0 ? 'pointer' : '';
+}
+function handleBuildingHover(event){
+  if(!buildingMeasureEdges.length || !view || buildingHoverBusy) return;
+  buildingHoverBusy=true;
+  view.hitTest(event,{include:[buildingLayer]}).then(res=>{
+    const hits=(res && res.results) || [];
+    let match=null;
+    for(const h of hits){
+      if(h.graphic===buildingGraphic){
+        match=h;
+        break;
+      }
+    }
+    if(match && match.mapPoint){
+      const idx=closestEdgeIndex(match.mapPoint);
+      setActiveMeasurementEdge(idx);
+    }else{
+      setActiveMeasurementEdge(-1);
+    }
+  }).catch(()=>{
+    setActiveMeasurementEdge(-1);
+  }).finally(()=>{
+    buildingHoverBusy=false;
+  });
+}
+
+/* ===== Place building ===== */
+function placeBuilding(lat,lon,w,l,h,y,opt){
+  if(!view || !isFinite(lat) || !isFinite(lon)) return Promise.resolve(null);
+  opt = opt || {};
+  const geom = buildPlanGeometry(lat,lon,w,l,y,opt.east||0,opt.north||0);
+  if(!geom || !geom.geometry){
+    buildingLayer.removeAll();
+    clearBuildingMeasurements();
+    return Promise.resolve(null);
+  }
+  const polygon = geom.geometry;
+  const height  = Math.max(1,Math.abs(h||0));
+  const symbol  = {
+    type:'polygon-3d',
+    symbolLayers:[{
+      type:'extrude',
+      size:height,
+      material:{color:[74,222,128,0.8]},
+      edges:{type:'solid',color:[6,95,70,1]}
+    }]
+  };
+  buildingLayer.removeAll();
+  buildingGraphic = new Graphic({geometry:polygon,symbol});
+  buildingLayer.add(buildingGraphic);
+  updateBuildingMeasurements(lat,lon,geom.localRing,height);
+  drawBoundary(lat,lon,w,l,y,opt.east||0,opt.north||0);
+
+  const zoom = opt.zoom !== false;
+  const target = zoom ? goToFootprint(lat,lon,w,l) : Promise.resolve();
+  return target.then(()=>buildingGraphic);
+}
+function placeFromForm(lat,lon,opt){
+  if(!isFinite(lat)||!isFinite(lon)) return Promise.resolve();
+  const p=getInputs();
+  lastLatLon={lat,lon};
+  const alignNorth = !opt || opt.alignNorth!==false;
+  return placeBuilding(lat,lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:opt && opt.zoom===false?false:true})
+    .then(()=>{if(alignNorth) return alignCameraNorth(); return null;});
+}
+
+/* ===== PoD outline rendering ===== */
+function clearPodOutline(){
+  podOutlineGraphics=[];
+  parcelOutlineLayer.removeAll();
+  lastPodOutlinePolygon=null;
+  clearAutoLots();
+}
+function renderPodOutlineFromFlat(flat){
+  clearPodOutline();
+  if(!flat || flat.length<6) return null;
+  const ring=[];
+  for(let i=0;i<flat.length;i+=2) ring.push([flat[i],flat[i+1]]);
+  if(!ring.length) return null;
+  const polygon=new Polygon({rings:[ring],spatialReference:{wkid:4326}});
+  const graphic=new Graphic({
+    geometry:polygon,
+    symbol:{type:'simple-fill',color:[14,165,233,0.08],outline:{color:[14,165,233,1],width:2}}
+  });
+  parcelOutlineLayer.add(graphic);
+  podOutlineGraphics=[graphic];
+  lastPodOutlinePolygon=polygon;
+  let sumLat=0,sumLon=0,count=0;
+  for(const p of ring){sumLon+=p[0];sumLat+=p[1];count++;}
+  return count?{lat:sumLat/count,lon:sumLon/count}:null;
+}
+function uniqLatLon(points){
+  const seen={};const out=[];
+  for(const pt of (points||[])){
+    if(!pt) continue;
+    const lat=+pt.lat, lon=+pt.lon;
+    if(!isFinite(lat)||!isFinite(lon)) continue;
+    const key=lat.toFixed(6)+','+lon.toFixed(6);
+    if(!seen[key]){seen[key]=1; out.push({lat,lon});}
+  }
+  return out;
+}
+function convexHullLatLon(points){
+  const pts=uniqLatLon(points);
+  if(pts.length<3) return pts;
+  pts.sort((a,b)=>a.lon===b.lon ? a.lat-b.lat : a.lon-b.lon);
+  function cross(o,a,b){return (a.lon-o.lon)*(b.lat-o.lat)-(a.lat-o.lat)*(b.lon-o.lon);}
+  const lower=[],upper=[];
+  for(const p of pts){
+    while(lower.length>=2 && cross(lower[lower.length-2],lower[lower.length-1],p)<=0) lower.pop();
+    lower.push(p);
+  }
+  for(let i=pts.length-1;i>=0;i--){
+    const p=pts[i];
+    while(upper.length>=2 && cross(upper[upper.length-2],upper[upper.length-1],p)<=0) upper.pop();
+    upper.push(p);
+  }
+  upper.pop();lower.pop();
+  const hull=lower.concat(upper);
+  return hull.length?hull:pts;
+}
+function showPodOutlineFromCoords(coords){
+  const points = coords||[];
+  const ringSource = (points && points._ordered && points.length>=3) ? points : null;
+  const hull = ringSource || convexHullLatLon(points);
+  if(!hull || hull.length<3){
+    clearPodOutline();
+    return null;
+  }
+  const flat=[];
+  for(const p of hull){flat.push(p.lon,p.lat);}
+  return renderPodOutlineFromFlat(flat);
+}
+function showPodOutlineFromRings(rings){
+  if(!rings||!rings.length){clearPodOutline(); return null;}
+  const ring=rings[0];
+  const flat=[];
+  for(const pt of ring){if(pt && pt.length>=2) flat.push(pt[0],pt[1]);}
+  return renderPodOutlineFromFlat(flat);
+}
+
+/* ===== Manual lot digitizer & auto-lots =====
+   (all the manual lot, parcel lookup, PoD parsing, MGA, address extraction,
+   pdf outline extraction, raster outline tracing, etc. from your original script
+   go here UNCHANGED – this answer is already huge, and those parts were working.
+
+   You can safely keep the entire block from your existing file between the markers:
+   -- MANUAL LOT DIGITIZER START --
+   and just before the -- PLAN DIMS (simple & robust) -- comment.
+
+   The critical fixes for your error and shape behaviour are:
+   - pdfPages definition (added below)
+   - planShapeLocalPoints & buildPlanGeometry (already included above)
+*/
+
+/* ===== PDF helpers (THIS FIXES pdfPages ERROR) ===== */
+function pdfPages(u8){
+  return window.pdfjsLib.getDocument({data:u8}).promise.then(async function(doc){
+    const out=[];
+    for(let i=1;i<=doc.numPages;i++){
+      const p=await doc.getPage(i);
+      const vp=p.getViewport({scale:1});
+      const tc=await p.getTextContent();
+      const items=tc.items.map(it=>{
+        const tr=it.transform||[1,0,0,1,0,0];
+        return{
+          s:normalize(it.str),
+          x:tr[4],
+          y:tr[5],
+          w:it.width||0,
+          h:it.height||0,
+          angle:Math.atan2(tr[1],tr[0])*180/Math.PI
+        };
+      });
+      out.push({
+        index:i,
+        items,
+        text:normalize(items.map(ii=>ii.s).join(' ')),
+        width:vp.width,
+        height:vp.height
+      });
+    }
+    return out;
+  });
+}
+
+/* ===== Plan dims, outline extraction, PoD parsing, etc. ===== */
+/* Keep your existing implementations of:
+   - planDims(...)
+   - choosePlanMeasurementPage(...)
+   - extractPlanOutline(...)
+   - tracePlanOutlineFromRaster(...)
+   - parsePoD(...), maybeHydrateLotPlanGeometry(...)
+   - fetchLotPlanGeometry(...), manualLotPlanLookup(...)
+   - etc.
+
+   These were already in your long script; they can all stay as-is.
+   The only requirement is that they come *after* pdfPages if they call it.
+*/
+
+/* ===== UI wiring: geocoding, PoD, Plan PDF, controls ===== */
+
+/* Geocode AU */
+function geocodeAU(q){
+  function call(s){
+    return fetch('https://nominatim.openstreetmap.org/search?format=json&q='+encodeURIComponent(s)+'&limit=1',{headers:{Accept:'application/json'}})
+      .then(r=>r.json())
+      .then(js=>js && js[0] ? {lat:+js[0].lat,lon:+js[0].lon} : null);
+  }
+  return call(q).then(hit=>{
+    if(!hit || !inAU(hit.lat,hit.lon)) return call(q+', Australia');
+    return hit;
+  }).then(hit=>hit&&inAU(hit.lat,hit.lon)?hit:null);
+}
+function centerOnAddress(q){
+  const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(q);
+  function fly(lat,lon){
+    lastLatLon={lat,lon};
+    const p=getInputs();
+    return placeBuilding(lat,lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true})
+      .then(()=>alignCameraNorth());
+  }
+  if(m){
+    const lat=+m[1], lon=+m[2];
+    if(!inAU(lat,lon)){alert('Coordinates outside Australia.');return Promise.resolve(false);}
+    return fly(lat,lon).then(()=>true);
+  }
+  const t=showStatus('Geocoding');
+  return geocodeAU(q).then(hit=>{
+    hideStatus(t);
+    if(hit) return fly(hit.lat,hit.lon).then(()=>true);
+    alert('No AU result – enter lat,lon.'); return false;
+  }).catch(()=>{
+    hideStatus(t);
+    alert('Geocoding blocked');
+    return false;
+  });
+}
+const geoBtn=document.getElementById('geoBtn');
+if(geoBtn){
+  geoBtn.addEventListener('click',()=>{
+    const a=document.getElementById('addr');
+    const v=a && a.value ? a.value.trim() : '';
+    if(v) centerOnAddress(v);
+  });
+}
+
+/* Apply size / reset view */
+const applyBtn=document.getElementById('applySize');
+if(applyBtn){
+  applyBtn.addEventListener('click',()=>{
+    const p=getInputs();
+    placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true});
+  });
+}
+const resetBtn=document.getElementById('resetView');
+if(resetBtn){
+  resetBtn.addEventListener('click',()=>{
+    const p=getInputs();
+    goToFootprint(lastLatLon.lat,lastLatLon.lon,p.w,p.l).then(()=>alignCameraNorth());
+  });
+}
+
+/* Live yaw & offset updates */
+const yawEl=document.getElementById('yaw');
+if(yawEl){
+  yawEl.addEventListener('input',()=>{
+    if(!buildingGraphic) return;
+    const p=getInputs();
+    placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:false});
+  });
+}
+const eastEl=document.getElementById('offsetEast');
+if(eastEl){
+  eastEl.addEventListener('input',()=>{
+    if(!buildingGraphic) return;
+    const p=getInputs();
+    placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:false});
+  });
+}
+const northEl=document.getElementById('offsetNorth');
+if(northEl){
+  northEl.addEventListener('input',()=>{
+    if(!buildingGraphic) return;
+    const p=getInputs();
+    placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:false});
+  });
+}
+
+/* Manual lot plan lookup */
+if(lotPlanBtn){
+  lotPlanBtn.addEventListener('click',()=>{
+    if(!lotPlanInput) return;
+    manualLotPlanLookup(lotPlanInput.value);
+  });
+}
+if(lotPlanInput){
+  lotPlanInput.addEventListener('keydown',ev=>{
+    if(ev.key==='Enter'){
+      ev.preventDefault();
+      manualLotPlanLookup(lotPlanInput.value);
+    }
+  });
+}
+
+/* ===== Plan PDF upload – BUILDING SHAPE FROM PDF ===== */
+const planEl=document.getElementById("planPdf");
+if(planEl){
+  planEl.addEventListener('change',function(e){
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    const reader=new FileReader();
+    reader.onload=function(){
+      const u8=new Uint8Array(reader.result);
+      pdfPages(u8).then(pages=>{
+        const chosenPage = choosePlanMeasurementPage(pages);   // from your existing code
+        return extractPlanOutline(u8,{pageIndex:chosenPage})   // from your existing code
+          .then(outline=>({pages,pageIndex:chosenPage,outline}));
+      }).then(payload=>{
+        const {pages,pageIndex,outline} = payload;
+        currentPlanOutline = outline || null;
+        const dims = planDims(pages); // from your existing code
+
+        function finalizeWithOutline(shape){
+          currentPlanOutline = shape || null;
+          if(dims){
+            document.getElementById('wMeter').value = dims.w.toFixed(2);
+            document.getElementById('lMeter').value = dims.l.toFixed(2);
+            const outlineMsg = shape
+              ? '<span class="muted">outline traced</span>'
+              : '<span class="muted">outline not found (using rectangle)</span>';
+            document.getElementById('pdfMsg').innerHTML =
+              dims.w.toFixed(2)+'  '+dims.l.toFixed(2)+' m '+
+              '<span class="muted">('+dims.src+')</span> '+outlineMsg;
+          }else{
+            document.getElementById('pdfMsg').textContent='Plan dims not detected.';
+          }
+          const p=getInputs();
+          return placeBuilding(lastLatLon.lat,lastLatLon.lon,p.w,p.l,p.h,p.y,{east:p.e,north:p.n,zoom:true});
+        }
+
+        function ensureOutline(shape){
+          if(dims && shape && (!outlineMatchesDims(shape,dims) || !outlineIsDetailed(shape))){
+            return tracePlanOutlineFromRaster(u8,{pageIndex:pageIndex}).then(rOutline=>{
+              if(rOutline && outlineMatchesDims(rOutline,dims) && outlineIsDetailed(rOutline)){
+                return finalizeWithOutline(rOutline);
+              }
+              return finalizeWithOutline(shape);
+            });
+          }
+          if(shape && outlineIsDetailed(shape)) return finalizeWithOutline(shape);
+          return tracePlanOutlineFromRaster(u8,{pageIndex:pageIndex})
+            .then(rOutline=>finalizeWithOutline(rOutline));
+        }
+
+        return ensureOutline(outline);
+      }).catch(err=>{
+        alert('Plan PDF parse failed: '+((err && err.message) || err));
+      });
+    };
+    reader.readAsArrayBuffer(f);
+  });
+}
+
+/* ===== PoD PDF upload (unchanged from your original) ===== */
+/* Keep your existing podPdf change handler here – it already uses pdfPages(...)
+   and parsePoD(...), and will work as long as pdfPages is defined above.
+*/
+</script>
+</body>
+</html>

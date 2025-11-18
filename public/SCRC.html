@@ -823,14 +823,21 @@
     }
 
     function collectLeafDisplayNodesByPredicate(pred, {includeDNT=false}={}){
-      const out=[];
+      const out=[], seen=new Set();
+      const pushUnique=(node)=>{
+        if(!node || !("visible" in node)) return;
+        const key=nodePath(node)||node.id||node.title||"node";
+        if(seen.has(key)) return;
+        seen.add(key);
+        out.push(node);
+      };
       walkAny(view.map,(n,underDNT)=>{
         if(!includeDNT && underDNT) return;
         const t=n.title||"", p=nodePath(n), id=n.id||"", tg=n.portalItem?.tags||[];
         if(!pred(n,t,p,id,tg)) return;
         const kids=kidsOf(n)||[];
-        if(kids.length){ leafDisplayNodes(n).forEach(x=>out.push(x)); }
-        else if("visible" in n){ out.push(n); }
+        if(kids.length){ leafDisplayNodes(n).forEach(pushUnique); }
+        else{ pushUnique(n); }
       });
       return out;
     }
@@ -946,6 +953,19 @@
       }
     }
 
+    function dedupeShotsByTitle(shots, title){
+      const target=(title||"").trim().toLowerCase();
+      if(!target) return;
+      let seen=false;
+      for(let i=shots.length-1;i>=0;i--){
+        const cur=(shots[i]?.title||"").trim().toLowerCase();
+        if(cur===target){
+          if(seen){ shots.splice(i,1); }
+          else{ seen=true; }
+        }
+      }
+    }
+
     /* ---------------- Build report ---------------- */
     $("btnPrintReport").addEventListener("click", async ()=>{
       $("rptOverlay").style.display="grid";
@@ -989,9 +1009,9 @@
               if(isZoning(t,p)) out.zoning.push(n);
               else if(isUtility(t,n.id,n.portalItem?.tags||[]) || isWaterOrSewer(p)) out.utilities.push(n);
               else if(isAcid(t,p)) out.acid.push(n);
+              else if(isNoise(t,p)) out.noise.push(n);
               else if(isTransport(t,p)) out.transport.push(n);
               else if(isAir(t,p)) out.air.push(n);
-              else if(isNoise(t,p)) out.noise.push(n);
               else if(isBushfire(t,p)) out.bushfire.push(n);
               else out.others.push(n);
             }catch{}
@@ -1022,6 +1042,7 @@
           setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
           await fn();
         }
+        dedupeShotsByTitle(shots,"Transport Noise Corridor");
         setRpt("Overlays rendered", 87, "rptS3");
 
         setRpt("Composing document…", 93);

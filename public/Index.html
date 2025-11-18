@@ -416,6 +416,86 @@ main{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
   100% { transform: translate(-30px,20px) scale(0.95); }
 }
 
+/* ===== Disclaimer modal ===== */
+body.modal-locked{
+  overflow:hidden;
+}
+
+.disclaimer-backdrop{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  background:rgba(5,7,12,.78);
+  backdrop-filter:blur(4px);
+  z-index:9500;
+  transition:opacity .25s ease;
+}
+
+.disclaimer-backdrop.is-hidden{
+  opacity:0;
+  pointer-events:none;
+}
+
+.disclaimer-panel{
+  width:100%;
+  max-width:520px;
+  padding:28px 32px;
+  border-radius:20px;
+  background:#fff;
+  color:#111;
+  box-shadow:0 30px 70px rgba(0,0,0,.45);
+  border:1px solid rgba(0,0,0,.08);
+}
+
+.disclaimer-panel h2{
+  margin:0 0 12px;
+  font-size:22px;
+}
+
+.disclaimer-panel p{
+  margin:0 0 12px;
+  color:#444;
+  line-height:1.5;
+  font-size:15px;
+}
+
+.disclaimer-notes{
+  font-size:13px;
+  color:#666;
+  margin-bottom:20px;
+}
+
+.disclaimer-actions{
+  display:flex;
+  justify-content:flex-end;
+}
+
+.disclaimer-confirm{
+  appearance:none;
+  border:none;
+  border-radius:999px;
+  background:linear-gradient(120deg,var(--brand-mid,#f9e3e8),var(--brand,#a70b13));
+  color:#fff;
+  font-weight:700;
+  padding:12px 28px;
+  cursor:pointer;
+  box-shadow:0 12px 26px rgba(167,11,19,.28);
+  transition:transform .18s ease, box-shadow .18s ease;
+}
+
+.disclaimer-confirm:hover{
+  transform:translateY(-1px);
+  box-shadow:0 16px 32px rgba(167,11,19,.32);
+}
+
+.disclaimer-confirm:focus-visible{
+  outline:3px solid rgba(167,11,19,.35);
+  outline-offset:3px;
+}
+
 /* Council selection card with image */
 .council-card {
   position: relative;
@@ -617,6 +697,16 @@ main{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
 
 </head>
 <body class="only-landing-body">
+  <div id="disclaimer-modal" class="disclaimer-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="disclaimer-title" aria-describedby="disclaimer-body" aria-hidden="true">
+    <div class="disclaimer-panel">
+      <h2 id="disclaimer-title">Important disclaimer</h2>
+      <p id="disclaimer-body">The interactive mapping is provided as a general guide only. Please do not solely rely on the information provided by this site for compliance, planning, or certification decisions.</p>
+      <p class="disclaimer-notes">Always verify property and planning information with official council data sources and seek professional advice before acting.</p>
+      <div class="disclaimer-actions">
+        <button type="button" class="disclaimer-confirm" data-disclaimer-accept>I understand</button>
+      </div>
+    </div>
+  </div>
   <!-- ===== Professional Splash / Intro ===== -->
   <div id="logo-splash" aria-hidden="true">
     <div class="splash-inner" role="status" aria-label="Loading Cornerstone Interactive Mapping">
@@ -721,9 +811,86 @@ main{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
   <footer class="landing-footer">
     <span>© Cornerstone Building Certifaction — Cornerstone Interactive Mapping</span>
     <div class="footer-links">
-      <a href="TC.html">Terms & Conditons</a>
+      <a href="#">Privacy</a>
+      <a href="#">Terms</a>
     </div>
   </footer>
+
+  <!-- ===== Disclaimer Script ===== -->
+  <script>
+  (function(){
+    var modal = document.getElementById("disclaimer-modal");
+    if (!modal) return;
+
+    var acceptBtn = modal.querySelector("[data-disclaimer-accept]");
+    var storageKey = "cs_disclaimer_ack_v1";
+    var storageRef = null;
+
+    try {
+      storageRef = window.sessionStorage;
+    } catch (err) {
+      storageRef = null;
+    }
+
+    function hasAcknowledged(){
+      if (!storageRef) return false;
+      try {
+        return storageRef.getItem(storageKey) === "1";
+      } catch (err) {
+        return false;
+      }
+    }
+
+    function setAcknowledged(){
+      if (!storageRef) return;
+      try {
+        storageRef.setItem(storageKey, "1");
+      } catch (err) {}
+    }
+
+    function hideModal(){
+      modal.classList.add("is-hidden");
+      modal.setAttribute("aria-hidden","true");
+      if (document.body) {
+        document.body.classList.remove("modal-locked");
+      }
+    }
+
+    function showModal(){
+      modal.classList.remove("is-hidden");
+      modal.setAttribute("aria-hidden","false");
+      if (document.body) {
+        document.body.classList.add("modal-locked");
+      }
+      if (acceptBtn && typeof acceptBtn.focus === "function") {
+        acceptBtn.focus();
+      }
+    }
+
+    function handleAccept(){
+      setAcknowledged();
+      hideModal();
+    }
+
+    function initModal(){
+      if (hasAcknowledged()) {
+        hideModal();
+        return;
+      }
+      showModal();
+    }
+
+    if (acceptBtn) {
+      acceptBtn.addEventListener("click", handleAccept);
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initModal);
+    } else {
+      initModal();
+    }
+  })();
+  </script>
 
   <!-- ===== Splash Control Script ===== -->
   <script>
@@ -783,4 +950,3 @@ main{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;}
 
 </body>
 </html>
-

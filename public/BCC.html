@@ -841,14 +841,21 @@
     }
 
     function collectLeafDisplayNodesByPredicate(pred, {includeDNT=false}={}){
-      const out=[];
+      const out=[], seen=new Set();
+      const pushUnique=(node)=>{
+        if(!node || !("visible" in node)) return;
+        const key=nodePath(node)||node.id||node.title||"node";
+        if(seen.has(key)) return;
+        seen.add(key);
+        out.push(node);
+      };
       walkAny(view.map,(n,underDNT)=>{
         if(!includeDNT && underDNT) return;
         const t=n.title||"", p=nodePath(n), id=n.id||"", tg=n.portalItem?.tags||[];
         if(!pred(n,t,p,id,tg)) return;
         const kids=kidsOf(n)||[];
-        if(kids.length){ leafDisplayNodes(n).forEach(x=>out.push(x)); }
-        else if("visible" in n){ out.push(n); }
+        if(kids.length){ leafDisplayNodes(n).forEach(pushUnique); }
+        else{ pushUnique(n); }
       });
       return out;
     }
@@ -880,8 +887,34 @@
       },{includeDNT:true});
     }
 
-    // Open Data API (v2.1) — Flood Awareness property parcel metrics
-    const ODS = "https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/flood-awareness-property-parcel-metrics/records";
+    // Property holding datasets
+    const ODS = "https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/property-boundaries-holding/records";
+    const HOLDING_FS = "https://services2.arcgis.com/dEKgZETqwmDAh1rP/arcgis/rest/services/property_boundaries_holding/FeatureServer/0/query";
+    const warmFloodwiseImages=new Set();
+    function warmFloodwiseReport(url){
+      if(!url) return;
+      try{
+        const req=fetch(url,{mode:"no-cors",cache:"no-store"});
+        if(req && typeof req.catch==="function"){
+          req.catch(()=>warmFloodwiseViaImage(url));
+        }
+      }catch{
+        warmFloodwiseViaImage(url);
+      }
+    }
+    function warmFloodwiseViaImage(url){
+      try{
+        const img=new Image();
+        img.decoding="async";
+        img.referrerPolicy="no-referrer";
+        img.src=url;
+        warmFloodwiseImages.add(img);
+        const clear=()=>warmFloodwiseImages.delete(img);
+        img.onload=clear;
+        img.onerror=clear;
+        setTimeout(clear,20000);
+      }catch{}
+    }
     async function _odsFetch(url){
       const res = await fetch(url, {mode:"cors"});
       if(!res.ok) throw new Error("ODS fetch failed: "+res.status);
@@ -895,42 +928,91 @@
     function _extractHolding(rec){
       if(!rec) return null;
       const keys = Object.keys(rec);
-      const k = keys.find(k=>/holding(_?id)?$/i.test(k)) || keys.find(k=>/holding/i.test(k));
-      return k ? (rec[k] ?? null) : null;
+      const k = keys.find(k=>/holding(_?id)?$/i.test(k))
+        || keys.find(k=>/property(_?id)?$/i.test(k))
+        || keys.find(k=>/holding/i.test(k));
+      if(!k) return null;
+      const val = rec[k];
+      return val==null || val==="" ? null : val;
     }
-    async function resolveFloodwiseHolding({geom, lotplanText}){
-      let candidate = null;
-
-      // 1) Try by lot/plan if available
-      if(lotplanText){
-        const lp = encodeURIComponent(lotplanText.toUpperCase());
-        for(const f of ["lot_plan","lotplan","lot_plan_no","lotplan_txt"]){
-          try{
-            const q = `${ODS}?limit=1&where=upper(${f})%20like%20'${lp}'`;
-            const j = await _odsFetch(q);
-            candidate = _extractHolding(j?.results?.[0]);
-            if(candidate) return String(candidate);
-          }catch{}
-        }
+    function plainGeometry(geom){
+      if(!geom) return null;
+      if(typeof geom.toJSON === "function"){
+        try{ return geom.toJSON(); }catch{}
       }
-      // 2) Spatial by extent
-      try{
-        const wkt = _wktOfExtent(geom.extent);
-        const q = `${ODS}?limit=1&where=intersects(geo_shape,geom'${encodeURIComponent(wkt)}')`;
+      try{ return JSON.parse(JSON.stringify(geom)); }catch{}
+      return null;
+    }
+    function guessGeometryType(g){
+      if(!g) return null;
+      if(g.rings) return "esriGeometryPolygon";
+      if(g.paths) return "esriGeometryPolyline";
+      if(typeof g.x === "number" && typeof g.y === "number") return "esriGeometryPoint";
+      if(typeof g.xmin === "number" && typeof g.ymin === "number") return "esriGeometryEnvelope";
+      return null;
+    }
+    async function fetchHoldingViaFeatureService(geom){
+      const plain = plainGeometry(geom);
+      if(!plain) return null;
+      const geometryType = guessGeometryType(plain) || "esriGeometryPolygon";
+      const sr = plain.spatialReference?.wkid || 4326;
+      const params = new URLSearchParams({
+        f: "json",
+        returnGeometry: "false",
+        outFields: "PROPERTY_ID",
+        spatialRel: "esriSpatialRelIntersects",
+        geometryType,
+        inSR: String(sr),
+        resultRecordCount: "1"
+      });
+      params.set("geometry", JSON.stringify(plain));
+      const res = await fetch(HOLDING_FS, {
+        method: "POST",
+        mode: "cors",
+        headers: {"Content-Type":"application/x-www-form-urlencoded"},
+        body: params
+      });
+      if(!res.ok) throw new Error("Holding FS query failed: "+res.status);
+      const json = await res.json();
+      const attrs = json?.features?.[0]?.attributes;
+      const id = attrs?.PROPERTY_ID ?? attrs?.property_id ?? null;
+      return id==null ? null : id;
+    }
+    async function resolveHoldingViaOds(geom){
+      let candidate = null;
+      const tryFetch = async(whereClause)=>{
+        const q = `${ODS}?limit=1&where=${whereClause}`;
         const j = await _odsFetch(q);
-        candidate = _extractHolding(j?.results?.[0]);
-        if(candidate) return String(candidate);
-      }catch{}
-      // 3) Centroid proximity fallback
-      try{
-        const cen = centroidOf(geom); if(cen){
-          const q = `${ODS}?limit=1&where=distance(geo_point_2d,geopoint'${cen.longitude} ${cen.latitude}')<30`;
-          const j = await _odsFetch(q);
-          candidate = _extractHolding(j?.results?.[0]);
+        return _extractHolding(j?.results?.[0]);
+      };
+      if(geom){
+        try{
+          const cen = centroidOf(geom);
+          if(cen){
+            candidate = await tryFetch(`distance(geo_point_2d,geopoint'${cen.longitude} ${cen.latitude}')<15`);
+            if(candidate) return String(candidate);
+          }
+        }catch{}
+      }
+      if(geom?.extent){
+        try{
+          const wkt = _wktOfExtent(geom.extent);
+          candidate = await tryFetch(`intersects(geo_shape,geom'${encodeURIComponent(wkt)}')`);
           if(candidate) return String(candidate);
-        }
+        }catch{}
+      }
+      return null;
+    }
+    async function resolveFloodwiseHolding({geom}){
+      if(!geom) return null;
+      try{
+        const fsHolding = await fetchHoldingViaFeatureService(geom);
+        if(fsHolding) return String(fsHolding);
       }catch{}
-
+      try{
+        const fallback = await resolveHoldingViaOds(geom);
+        if(fallback) return String(fallback);
+      }catch{}
       return null;
     }
     function buildFWPRUrl(holdingId){
@@ -1035,6 +1117,19 @@
       }
     }
 
+    function dedupeShotsByTitle(shots, title){
+      const target=(title||"").trim().toLowerCase();
+      if(!target) return;
+      let seen=false;
+      for(let i=shots.length-1;i>=0;i--){
+        const cur=(shots[i]?.title||"").trim().toLowerCase();
+        if(cur===target){
+          if(seen){ shots.splice(i,1); }
+          else{ seen=true; }
+        }
+      }
+    }
+
     /* ---------------- Build report ---------------- */
     $("btnPrintReport").addEventListener("click", async ()=>{
       $("rptOverlay").style.display="grid";
@@ -1078,9 +1173,9 @@
               if(isZoning(t,p)) out.zoning.push(n);
               else if(isUtility(t,n.id,n.portalItem?.tags||[]) || isWaterOrSewer(p)) out.utilities.push(n);
               else if(isAcid(t,p)) out.acid.push(n);
+              else if(isNoise(t,p)) out.noise.push(n);
               else if(isTransport(t,p)) out.transport.push(n);
               else if(isAir(t,p)) out.air.push(n);
-              else if(isNoise(t,p)) out.noise.push(n);
               else if(isBushfire(t,p)) out.bushfire.push(n);
               else out.others.push(n);
             }catch{}
@@ -1100,8 +1195,9 @@
         if(hasFlood && geom){
           try{
             const lotplan = (lastParcelInfo?.lotText||"").toUpperCase(); // "12/SP12345"
-            const holding = await resolveFloodwiseHolding({geom, lotplanText: lotplan.includes("/") ? lotplan : null});
+            const holding = await resolveFloodwiseHolding({geom});
             floodFWPRUrl = buildFWPRUrl(holding);
+            if(floodFWPRUrl){ warmFloodwiseReport(floodFWPRUrl); }
           }catch{}
         }
 
@@ -1129,6 +1225,7 @@
           setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
           await fn();
         }
+        dedupeShotsByTitle(shots,"Transport Noise Corridor");
         setRpt("Overlays rendered", 87, "rptS3");
 
         
@@ -1222,10 +1319,10 @@ setRpt("Composing document…", 93);
                 "<h2 class='section-title' style='margin:0'>FloodWise Property Report</h2>",
               "</div>",
               floodFWPRUrl
-                ? `<p>Flood mapping affects this parcel. Open the official Brisbane City Council FloodWise Property Report for property-specific flood planning levels and floor level requirements.</p>
+                ? `<p>Flood mapping affects this parcel. The FloodWise Property Report search is already running so the document is ready the moment you open it.</p>
                    <p><a href='${floodFWPRUrl}' target='_blank' rel='noopener' class='backbtn' style='font-weight:700'>Open FloodWise Report ↗</a></p>`
-                : `<p>Flood mapping affects this parcel. The official FloodWise Property Report provides property-specific flood planning levels and requirements. If the direct link can’t be resolved automatically, open the FloodWise tool and search by address.</p>
-                   <p><a href='https://www.brisbane.qld.gov.au/building-and-planning/supporting-documents-and-online-tools/floodwise-property-report' target='_blank' rel='noopener' class='backbtn'>Go to FloodWise Property Report ↗</a></p>`,
+                : `<p>Flood mapping affects this parcel. Brisbane City Council now hosts the FloodWise Property Report inside the Flood Awareness Map, so launch that tool to generate the latest document for this property.</p>
+                   <p><a href='https://fam.brisbane.qld.gov.au/?page=Map---Standard' target='_blank' rel='noopener' class='backbtn'>Open Flood Awareness Map ↗</a></p>`,
               "<div class='rpt-footer'>Use the FloodWise report for development/floor level decisions; map snapshots here are indicative only.</div>",
             "</div>"
           );
@@ -1245,13 +1342,6 @@ setRpt("Composing document…", 93);
 
         const w=window.open("about:blank","_blank");
         if(w){ w.document.open(); w.document.write(html.join("")); w.document.close(); try{ w.document.title = docTitle; }catch{} setTimeout(()=>{try{w.focus(); w.print();}catch{}},350); }
-
-        // Optional: try to auto-open FWPR in a new tab (graceful if blocked)
-        try{
-          if(floodFWPRUrl){
-            window.open(floodFWPRUrl, "_blank", "noopener");
-          }
-        }catch{}
 
         setRpt("Done", 100, "rptS4");
       }catch(e){ console.error(e); alert("Could not create report."); }

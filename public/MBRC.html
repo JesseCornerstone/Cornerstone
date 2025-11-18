@@ -977,7 +977,7 @@
         const shots=[];
         const tasks=[
           ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true,{forceAllVisible:true}); if(s) shots.push(s); }}],
-          ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",()=>[],geom,baseShot,"No bushfire Lv"); }],
+          ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",()=>cats.bushfire,geom,baseShot,"No bushfire Lv"); }],
           ["Utilities", async()=>{ if(cats.utilities.length){ const s=await screenshotFor(cats.utilities,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
           ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
           ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],

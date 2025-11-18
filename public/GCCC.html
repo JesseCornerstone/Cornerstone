@@ -855,6 +855,19 @@
       }
     }
 
+    function dedupeShotsByTitle(shots, title){
+      const target=(title||"").trim().toLowerCase();
+      if(!target) return;
+      let seen=false;
+      for(let i=shots.length-1;i>=0;i--){
+        const cur=(shots[i]?.title||"").trim().toLowerCase();
+        if(cur===target){
+          if(seen){ shots.splice(i,1); }
+          else{ seen=true; }
+        }
+      }
+    }
+
     document.getElementById("btnPrintReport").addEventListener("click", async ()=>{
       document.getElementById("rptOverlay").style.display="grid";
       try{ await buildAndOpenReport(); } finally { document.getElementById("rptOverlay").style.display="none"; }
@@ -897,9 +910,9 @@
               if(isZoning(t,p)) out.zoning.push(n);
               else if(isUtility(t,n.id,n.portalItem?.tags||[]) || isWaterOrSewer(p)) out.utilities.push(n);
               else if(isAcid(t,p)) out.acid.push(n);
+              else if(isNoise(t,p)) out.noise.push(n);
               else if(isTransport(t,p)) out.transport.push(n);
               else if(isAir(t,p)) out.air.push(n);
-              else if(isNoise(t,p)) out.noise.push(n);
               else if(isBushfire(t,p)) out.bushfire.push(n);
               else out.others.push(n);
             }catch{}
@@ -911,11 +924,11 @@
         const tasks=[
           ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); }}],
           ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",()=>[],geom,baseShot,"No bushfire Lv"); }],
-          ["Utilities", async()=>{ const all=[]; if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
+          ["Utilities", async()=>{ const all=[...cats.utilities]; if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
           ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
           ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
           ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
-          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",()=>[],geom,baseShot,"No noise Lv"); }],
+          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",()=>cats.noise,geom,baseShot,"No noise Lv"); }],
           ["Other overlays", async()=>{
             for (const n of cats.others) {
               const t = n.title || "", p = nodePath(n);
@@ -930,6 +943,7 @@
           setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
           await fn();
         }
+        dedupeShotsByTitle(shots,"Transport Noise Corridor");
         setRpt("Overlays rendered", 87, "rptS3");
 
         setRpt("Composing document…", 93);

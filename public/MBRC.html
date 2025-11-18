@@ -279,13 +279,30 @@
     const isUtility=(title,id="",tags=[])=>/\b(utilit(y|ies)|power|electric|telecom|gas|water|sewer|storm[-\s]?water|reticulation|service)\b/i.test(inText(title,id)+" "+(tags||[]).join(" "));
     const isWaterOrSewer=(path)=>/\b(water|sewer|storm[\s-]*water|drainage|watercourse)\b/i.test(String(path||""));
     const isAcid=(t,p="")=>/\bacid\b/i.test(inText(t,p));
-    const isTransport=(t,p="")=>/\b(transport|road|rail|corridor|traffic|cycle|bikeway|pedestrian|carpark|parking|transit|bus|ferry)\b/i.test(inText(t,p));
+    const isTransport=(t,p="")=>{
+      if(isNoise(t,p)) return false;
+      return /\b(transport|road|rail|corridor|traffic|cycle|bikeway|pedestrian|carpark|parking|transit|bus|ferry)\b/i.test(inText(t,p));
+    };
     const isAir=(t,p="")=>/\b(air\s*quality|air-quality|air|pollution)\b/i.test(inText(t,p));
     const isNoise=(t,p="")=>/\b(noise|acoustic|transport.*noise.*corridor|tnc)\b/i.test(inText(t,p));
     const isZoning=(t,p="")=>/\b(zoning|zone|zones)\b/i.test(inText(t,p));
     const isBushfire=(t,p="")=>/\b(bush[-\s]?fire|bushfire|bush\s*fire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p));
 
     const kidsOf=n=>(n.layers?.toArray?.()??n.layers)||(n.sublayers?.toArray?.()??n.sublayers)||[];
+    const featureLayerCache=new WeakMap();
+    async function featureLayerFor(node){
+      if(!node || typeof node.createFeatureLayer!=="function") return null;
+      if(featureLayerCache.has(node)) return featureLayerCache.get(node);
+      try{
+        const fl=await node.createFeatureLayer();
+        await fl?.load?.();
+        featureLayerCache.set(node,fl);
+        return fl;
+      }catch{
+        featureLayerCache.set(node,null);
+        return null;
+      }
+    }
     const nodePath=n=>{const bits=[]; let cur=n; while(cur){bits.unshift(cur.title||cur.id||"node"); cur=cur.parent;} return bits.join(" / ");};
 
     function walkAny(node,cb,inheritedDNT=false){
@@ -594,10 +611,31 @@
 
     const bufferedAOIFor=(node,geom)=>{ try{ const gt=(node.geometryType||"").toLowerCase(); if(gt==="point"||gt==="multipoint"||gt==="polyline") return geometryEngine.buffer(geom,TOUCH_BUFFER_M,"meters"); }catch{} return geom; };
     async function countFeatures(node,geom){
-      const g=bufferedAOIFor(node,geom);
-      try{ if(typeof node.queryFeatureCount==="function"){ const c=await node.queryFeatureCount({geometry:g,spatialRelationship:"intersects"}); return Number(c)||0; } }catch{}
-      try{ if(typeof node.queryFeatures==="function"){ const q=await node.queryFeatures({geometry:g,spatialRelationship:"intersects",returnGeometry:false,outFields:["*"],num:1}); return q.features?.length?1:0; } }catch{}
-      return 0;
+      if(!node) return 0;
+      const hasNativeQueries=(typeof node.queryFeatureCount==="function") || (typeof node.queryFeatures==="function");
+      const tryCount=async target=>{
+        if(!target) return 0;
+        const g=bufferedAOIFor(target,geom);
+        try{
+          if(typeof target.queryFeatureCount==="function"){
+            const c=await target.queryFeatureCount({geometry:g,spatialRelationship:"intersects"});
+            const num=Number(c)||0;
+            if(num) return num;
+          }
+        }catch{}
+        try{
+          if(typeof target.queryFeatures==="function"){
+            const q=await target.queryFeatures({geometry:g,spatialRelationship:"intersects",returnGeometry:false,outFields:["*"],num:1});
+            if(q.features?.length) return q.features.length;
+          }
+        }catch{}
+        return 0;
+      };
+      let cnt=await tryCount(node);
+      if(cnt>0 || hasNativeQueries) return cnt;
+      const fl=await featureLayerFor(node);
+      if(!fl) return cnt;
+      return await tryCount(fl);
     }
     async function hideUnusedOverlaysFor(geom){
       const nodes=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) nodes.push(n); });
@@ -731,26 +769,40 @@
       const isZone=isZoning(layerNode.title||"",nodePath(layerNode));
       const g=(gt==="point"||gt==="multipoint"||gt==="polyline") ? geometryEngine.buffer(lotGeom,TOUCH_BUFFER_M,"meters") : lotGeom;
 
-      let feats=[];
-      try{
-        const q=await layerNode.queryFeatures({geometry:g,spatialRelationship:"intersects",returnGeometry:true,outFields:["*"],maxRecordCountFactor:6});
-        feats=q.features||[];
-      }catch{}
+      const queryOpts={geometry:g,spatialRelationship:"intersects",returnGeometry:true,outFields:["*"],maxRecordCountFactor:6};
+      const fetchFeatures=async target=>{
+        if(typeof target?.queryFeatures!=="function") return [];
+        try{
+          const q=await target.queryFeatures(queryOpts);
+          return q.features||[];
+        }catch{
+          return [];
+        }
+      };
+      let legendSource=layerNode;
+      let feats=await fetchFeatures(legendSource);
+      if(!feats.length){
+        const fl=await featureLayerFor(layerNode);
+        if(fl){
+          legendSource=fl;
+          feats=await fetchFeatures(fl);
+        }
+      }
       if(!feats.length) return {items:[]};
 
       const itemMap=new Map();
       for(const f of feats){
-        const gph=new Graphic({geometry:f.geometry,attributes:f.attributes,layer:layerNode});
+        const gph=new Graphic({geometry:f.geometry,attributes:f.attributes,layer:legendSource});
         let sym=null;
         try{ sym=await symbolUtils.getDisplayedSymbol(gph,view); }catch{}
         if(!sym){
-          const r=layerNode.renderer; sym = r?.symbol || r?.defaultSymbol || f.symbol || null;
+          const r=legendSource.renderer || layerNode.renderer; sym = r?.symbol || r?.defaultSymbol || f.symbol || null;
         }
         if(!sym) continue;
 
         let label=isZone?pickZoneLabel(f.attributes):null;
         if(!label){
-          const r=layerNode.renderer;
+          const r=legendSource.renderer || layerNode.renderer;
           if(r?.type==="unique-value"){
             const info=getUVInfo(r,f.attributes);
             if(info) label=info.label ?? String(info.value ?? (info.values||[]).join(", "));
@@ -902,13 +954,14 @@
         setRpt("Collecting overlays…", 55);
         const cats = geom ? await (async()=>{
           const out={zoning:[],utilities:[],acid:[],transport:[],air:[],noise:[],bushfire:[],others:[]};
-          const arr=[]; walkAny(view.map,(n,underDNT)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function") && !underDNT) arr.push(n); });
+          const arr=[]; walkAny(view.map,(n,underDNT)=>{ const canQuery=(typeof n?.queryFeatures==="function" || typeof n?.queryFeatureCount==="function"); const canProxy=typeof n?.createFeatureLayer==="function"; if(n && (n.type==="feature"||n.type==="sublayer") && (canQuery||canProxy) && !underDNT) arr.push(n); });
           for(const n of arr){
             try{
               await n.load();
-              const cnt=await countFeatures(n,geom); if(!cnt) continue;
               const t=n.title||"", p=nodePath(n);
-              if(isZoning(t,p)) out.zoning.push(n);
+              const zoneMatch=isZoning(t,p);
+              const cnt=await countFeatures(n,geom); if(!cnt && !zoneMatch) continue;
+              if(zoneMatch) out.zoning.push(n);
               else if(isUtility(t,n.id,n.portalItem?.tags||[]) || isWaterOrSewer(p)) out.utilities.push(n);
               else if(isAcid(t,p)) out.acid.push(n);
               else if(isTransport(t,p)) out.transport.push(n);
@@ -923,13 +976,13 @@
 
         const shots=[];
         const tasks=[
-          ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); }}],
+          ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true,{forceAllVisible:true}); if(s) shots.push(s); }}],
           ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",()=>[],geom,baseShot,"No bushfire Lv"); }],
-          ["Utilities", async()=>{ const all=[]; if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
+          ["Utilities", async()=>{ if(cats.utilities.length){ const s=await screenshotFor(cats.utilities,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
           ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
           ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
           ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
-          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",()=>[],geom,baseShot,"No noise Lv"); }],
+          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",()=>cats.noise,geom,baseShot,"No noise Lv"); }],
           ["Other overlays", async()=>{
             for (const n of cats.others) {
               const t = n.title || "", p = nodePath(n);

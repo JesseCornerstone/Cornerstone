@@ -9,20 +9,25 @@ const path = require('path');
 
 const app = express();
 
-// ---------- DB CONFIG (Azure SQL via full connection string) ----------
+// ---------- DB CONFIG (single Azure connection string) ----------
 const connectionString = process.env.SQL_CONNECTION_STRING;
 
-// Lazy pool using a single connection string
+// Lazy pool using full connection string
 let pool = null;
+let poolErrorMessage = null;
+
 async function getPool() {
   if (pool && pool.connected) return pool;
   try {
     pool = await sql.connect(connectionString);
+    poolErrorMessage = null;
     console.log('✅ Connected to SQL');
     return pool;
   } catch (err) {
     console.error('❌ DB connection error:', err);
-    return null; // routes will handle null and return 500
+    pool = null;
+    poolErrorMessage = err.message;
+    return null;
   }
 }
 
@@ -32,7 +37,7 @@ const REPORT_BASE_URL =
   'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
 
 // ---------- MIDDLEWARE ----------
-app.use(cors());             // allow all origins (easy for Squarespace + testing)
+app.use(cors()); // allow all origins for now (good for Squarespace + testing)
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -90,6 +95,24 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// TEMP: test DB connection directly, show message in browser
+app.get('/api/db-test', async (req, res) => {
+  try {
+    const pool = await getPool();
+    if (!pool) {
+      return res.status(500).json({
+        ok: false,
+        message: poolErrorMessage || 'Pool is null (no SQL connection).'
+      });
+    }
+    const result = await pool.request().query('SELECT DB_NAME() AS db, SYSTEM_USER AS userName');
+    return res.json({ ok: true, info: result.recordset[0] });
+  } catch (err) {
+    console.error('DB test error:', err);
+    return res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
 // Current user
 app.get('/api/me', async (req, res) => {
   try {
@@ -99,7 +122,7 @@ app.get('/api/me', async (req, res) => {
 
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).json({ user: null, error: 'DB connection failed' });
+      return res.status(500).json({ user: null, error: poolErrorMessage || 'DB connection failed' });
     }
 
     const result = await pool.request()
@@ -128,7 +151,7 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).json({ ok: false, error: 'DB connection failed' });
+      return res.status(500).json({ ok: false, error: poolErrorMessage || 'DB connection failed' });
     }
 
     const existing = await pool.request()
@@ -174,7 +197,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).json({ ok: false, error: 'DB connection failed' });
+      return res.status(500).json({ ok: false, error: poolErrorMessage || 'DB connection failed' });
     }
 
     const result = await pool.request()
@@ -219,7 +242,6 @@ app.post('/api/auth/logout', (req, res) => {
 // ---------- ONE-TIME TOKEN ROUTES ----------
 
 // Create token from Squarespace order
-// Body: { "email": "user@example.com", "orderId": "SQUARESPACE-ORDER-ID" }
 app.post('/api/create-token', async (req, res) => {
   try {
     const { email, orderId } = req.body || {};
@@ -231,7 +253,7 @@ app.post('/api/create-token', async (req, res) => {
 
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).send('DB connection failed.');
+      return res.status(500).send('DB connection failed: ' + (poolErrorMessage || 'no details'));
     }
 
     const token = generateToken(32);
@@ -259,7 +281,6 @@ app.post('/api/create-token', async (req, res) => {
 });
 
 // Finalise (use) a token after printing
-// POST /api/finalise-token?key=...
 app.post('/api/finalise-token', async (req, res) => {
   try {
     const key = req.query.key;
@@ -271,7 +292,7 @@ app.post('/api/finalise-token', async (req, res) => {
 
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).send('DB connection failed.');
+      return res.status(500).send('DB connection failed: ' + (poolErrorMessage || 'no details'));
     }
 
     const updateSql = `

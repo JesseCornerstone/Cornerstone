@@ -9,25 +9,15 @@ const path = require('path');
 
 const app = express();
 
-// ---------- DB CONFIG (Azure SQL) ----------
-const dbConfig = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  server: process.env.DB_SERVER,
-  port: parseInt(process.env.DB_PORT || '1433', 10),
-  database: process.env.DB_NAME,
-  options: {
-    encrypt: true,
-    trustServerCertificate: false
-  }
-};
+// ---------- DB CONFIG (Azure SQL via full connection string) ----------
+const connectionString = process.env.SQL_CONNECTION_STRING;
 
-// Lazy connection pool – avoids crashing the app if SQL is down
+// Lazy pool using a single connection string
 let pool = null;
 async function getPool() {
   if (pool && pool.connected) return pool;
   try {
-    pool = await sql.connect(dbConfig);
+    pool = await sql.connect(connectionString);
     console.log('✅ Connected to SQL');
     return pool;
   } catch (err) {
@@ -81,7 +71,6 @@ function generateToken(byteLength = 32) {
     .replace(/=+$/g, '');
 }
 
-// Optional: log unhandled errors instead of silently killing the app
 process.on('unhandledRejection', err => {
   console.error('UNHANDLED REJECTION:', err);
 });
@@ -96,7 +85,7 @@ app.get('/api/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-// Health check - just returns ok (no DB)
+// Health
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
@@ -312,8 +301,6 @@ app.post('/api/finalise-token', async (req, res) => {
 });
 
 // ---------- STATIC FRONT-END ----------
-
-// Serve everything from /public (e.g. BCC.html, index.html, etc.)
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;

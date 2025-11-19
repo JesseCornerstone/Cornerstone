@@ -21,8 +21,18 @@ const dbConfig = {
   }
 };
 
-// single connection pool
-const poolPromise = sql.connect(dbConfig);
+// Lazy connection pool – avoids crashing on startup
+let pool = null;
+async function getPool() {
+  if (pool && pool.connected) return pool;
+  try {
+    pool = await sql.connect(dbConfig);
+    return pool;
+  } catch (err) {
+    console.error('DB connection error:', err);
+    throw err;
+  }
+}
 
 // Where BCC.html lives (we append ?key=... to this)
 const REPORT_BASE_URL =
@@ -30,26 +40,9 @@ const REPORT_BASE_URL =
   'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
 
 // ---------- MIDDLEWARE ----------
-app.use(cors({
-  origin: (origin, cb) => {
-    const allowed = (process.env.FRONTEND_ORIGIN || '')
-      .split(',')
-      .map(x => x.trim())
-      .filter(Boolean);
-
-    // allow curl / same-origin / no Origin header
-    if (!origin) return cb(null, true);
-
-    if (!allowed.length || allowed.includes(origin)) {
-      return cb(null, true);
-    }
-
-    return cb(new Error('Not allowed by CORS: ' + origin));
-  },
-  credentials: true
-}));
-
+app.use(cors());             // allow all origins for now (easy for Squarespace + testing)
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
 
 app.use(session({
   name: 'cs_sess',
@@ -99,7 +92,8 @@ app.get('/api/me', async (req, res) => {
     if (!req.session.userId) {
       return res.json({ user: null });
     }
-    const pool = await poolPromise;
+
+    const pool = await getPool();
     const result = await pool.request()
       .input('id', sql.Int, req.session.userId)
       .query(`
@@ -124,7 +118,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 
   try {
-    const pool = await poolPromise;
+    const pool = await getPool();
 
     const existing = await pool.request()
       .input('email', sql.NVarChar, email)
@@ -167,7 +161,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 
   try {
-    const pool = await poolPromise;
+    const pool = await getPool();
     const result = await pool.request()
       .input('email', sql.NVarChar, email)
       .query(`
@@ -210,7 +204,7 @@ app.post('/api/auth/logout', (req, res) => {
 // ---------- ONE-TIME TOKEN ROUTES ----------
 
 // POST /api/create-token
-// body: { "email": "user@example.com", "orderId": "SQ-ORDER-ID" }
+// Body: { "email": "user@example.com", "orderId": "SQUARESPACE-ORDER-ID" }
 app.post('/api/create-token', async (req, res) => {
   try {
     const { email, orderId } = req.body || {};
@@ -218,8 +212,8 @@ app.post('/api/create-token', async (req, res) => {
       return res.status(400).send('Missing email or orderId.');
     }
 
+    const pool = await getPool();
     const token = generateToken(32);
-    const pool = await poolPromise;
 
     const insertSql = `
       INSERT INTO dbo.ReportAccessTokens (Token, UserEmail, PaymentId, ExpiresAt)
@@ -250,7 +244,7 @@ app.post('/api/finalise-token', async (req, res) => {
       return res.status(400).send('Missing key.');
     }
 
-    const pool = await poolPromise;
+    const pool = await getPool();
     const updateSql = `
       UPDATE dbo.ReportAccessTokens
       SET Used = 1,
@@ -265,7 +259,9 @@ app.post('/api/finalise-token', async (req, res) => {
       .query(updateSql);
 
     if (!result.rowsAffected || result.rowsAffected[0] === 0) {
-      return res.status(400).send('This report link is invalid, expired, or already used.');
+      return res
+        .status(400)
+        .send('This report link is invalid, expired, or already used.');
     }
 
     return res.sendStatus(200);

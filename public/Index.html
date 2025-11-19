@@ -931,22 +931,9 @@ body.modal-locked{
     }
   })();
   </script>
-  <!-- Auth heartbeat -->
-  <script type="module">
-    import { startSessionHeartbeat, onAuthChange, updateUserChip } from './Js/auth.js';
 
-    const applyUserState = (user) => {
-      document.querySelectorAll('[data-user-email]').forEach((el) => {
-        el.textContent = user && user.email ? user.email : 'Guest';
-      });
-      updateUserChip(user || null);
-    };
-
-    updateUserChip(null);
-    onAuthChange(applyUserState);
-    startSessionHeartbeat();
-  </script>
 
 </body>
 </html>
+
 

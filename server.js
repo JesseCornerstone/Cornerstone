@@ -5,6 +5,7 @@ const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
 const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
 
@@ -21,16 +22,17 @@ const dbConfig = {
   }
 };
 
-// Lazy connection pool – avoids crashing on startup
+// Lazy connection pool – avoids crashing the app if SQL is down
 let pool = null;
 async function getPool() {
   if (pool && pool.connected) return pool;
   try {
     pool = await sql.connect(dbConfig);
+    console.log('✅ Connected to SQL');
     return pool;
   } catch (err) {
-    console.error('DB connection error:', err);
-    throw err;
+    console.error('❌ DB connection error:', err);
+    return null; // routes will handle null and return 500
   }
 }
 
@@ -40,7 +42,7 @@ const REPORT_BASE_URL =
   'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
 
 // ---------- MIDDLEWARE ----------
-app.use(cors());             // allow all origins for now (easy for Squarespace + testing)
+app.use(cors());             // allow all origins (easy for Squarespace + testing)
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -79,9 +81,22 @@ function generateToken(byteLength = 32) {
     .replace(/=+$/g, '');
 }
 
+// Optional: log unhandled errors instead of silently killing the app
+process.on('unhandledRejection', err => {
+  console.error('UNHANDLED REJECTION:', err);
+});
+process.on('uncaughtException', err => {
+  console.error('UNCAUGHT EXCEPTION:', err);
+});
+
 // ---------- BASIC / AUTH ROUTES ----------
 
-// Health check
+// Simple ping to confirm app is running
+app.get('/api/ping', (req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
+
+// Health check - just returns ok (no DB)
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
@@ -94,6 +109,10 @@ app.get('/api/me', async (req, res) => {
     }
 
     const pool = await getPool();
+    if (!pool) {
+      return res.status(500).json({ user: null, error: 'DB connection failed' });
+    }
+
     const result = await pool.request()
       .input('id', sql.Int, req.session.userId)
       .query(`
@@ -119,6 +138,9 @@ app.post('/api/auth/register', async (req, res) => {
 
   try {
     const pool = await getPool();
+    if (!pool) {
+      return res.status(500).json({ ok: false, error: 'DB connection failed' });
+    }
 
     const existing = await pool.request()
       .input('email', sql.NVarChar, email)
@@ -162,6 +184,10 @@ app.post('/api/auth/login', async (req, res) => {
 
   try {
     const pool = await getPool();
+    if (!pool) {
+      return res.status(500).json({ ok: false, error: 'DB connection failed' });
+    }
+
     const result = await pool.request()
       .input('email', sql.NVarChar, email)
       .query(`
@@ -203,16 +229,22 @@ app.post('/api/auth/logout', (req, res) => {
 
 // ---------- ONE-TIME TOKEN ROUTES ----------
 
-// POST /api/create-token
+// Create token from Squarespace order
 // Body: { "email": "user@example.com", "orderId": "SQUARESPACE-ORDER-ID" }
 app.post('/api/create-token', async (req, res) => {
   try {
     const { email, orderId } = req.body || {};
+    console.log('🔑 /api/create-token hit with:', email, orderId);
+
     if (!email || !orderId) {
       return res.status(400).send('Missing email or orderId.');
     }
 
     const pool = await getPool();
+    if (!pool) {
+      return res.status(500).send('DB connection failed.');
+    }
+
     const token = generateToken(32);
 
     const insertSql = `
@@ -229,6 +261,7 @@ app.post('/api/create-token', async (req, res) => {
     const sep = REPORT_BASE_URL.includes('?') ? '&' : '?';
     const reportUrl = `${REPORT_BASE_URL}${sep}key=${token}`;
 
+    console.log('🔗 Report URL:', reportUrl);
     return res.json({ reportUrl });
   } catch (err) {
     console.error('Error in /api/create-token:', err);
@@ -236,15 +269,22 @@ app.post('/api/create-token', async (req, res) => {
   }
 });
 
+// Finalise (use) a token after printing
 // POST /api/finalise-token?key=...
 app.post('/api/finalise-token', async (req, res) => {
   try {
     const key = req.query.key;
+    console.log('🧹 /api/finalise-token hit with:', key);
+
     if (!key) {
       return res.status(400).send('Missing key.');
     }
 
     const pool = await getPool();
+    if (!pool) {
+      return res.status(500).send('DB connection failed.');
+    }
+
     const updateSql = `
       UPDATE dbo.ReportAccessTokens
       SET Used = 1,
@@ -272,9 +312,11 @@ app.post('/api/finalise-token', async (req, res) => {
 });
 
 // ---------- STATIC FRONT-END ----------
-app.use(express.static('public'));
+
+// Serve everything from /public (e.g. BCC.html, index.html, etc.)
+app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Cornerstone auth + token API listening on port ${PORT}`);
+  console.log(`🚀 Cornerstone auth + token API listening on port ${PORT}`);
 });

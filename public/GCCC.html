@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Gold Coast Interactive Mapping — COGC</title>
+<link rel="icon" type="image/png" href="./images/Flavour icon.png">
+<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css"/>
+
+<style>
+  :root{ --brand:#a70b13; --brand2:#7f0e15; --bg:#f6f7f9; --ink:#0b0d12; --border:#e1e3e6; --radius:14px; --shadow:0 6px 18px rgba(16,21,28,.08); }
+  html,body{height:100%;margin:0}
+  body{display:flex;flex-direction:column;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;color:#fff;background:linear-gradient(90deg,var(--brand),var(--brand2));box-shadow:var(--shadow)}
+  .brand{font-weight:800;letter-spacing:.2px}
+  .toolbar{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{border:none;border-radius:999px;padding:10px 14px;cursor:pointer;color:#fff;background:rgba(255,255,255,.14)}
+  .btn:hover{background:rgba(255,255,255,.22)}
+  .btn.linklike{background:transparent;border:1px solid rgba(255,255,255,.45)}
+
+  #contextBar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid var(--border)}
+  .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:4px 10px;font-size:12px}
+
+  main{flex:1;min-height:520px;display:grid;grid-template-columns:clamp(280px,24vw,420px) 1fr;gap:12px;padding:12px}
+  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+  #viewWrap{position:relative;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  #viewDiv{position:absolute;inset:0}
+
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);background:#fff;padding:6px}
+  .tab{flex:1;min-width:0;text-align:center;border-radius:10px;padding:8px 10px;font-weight:700;color:#7a0f16;background:#fff;cursor:pointer}
+  .tab[aria-selected="true"]{background:#fff1f3;border:1px solid #f2c7cc}
+  .panel{display:none;padding:12px}
+  .panel.active{display:block}
+
+  #statusBar{display:flex;gap:24px;align-items:center;padding:6px 16px;background:#fff;border-top:1px solid var(--border);color:#555;font-size:12px}
+
+  #loadingMask{position:absolute;inset:0;background:rgba(255,255,255,.65);display:none;align-items:center;justify-content:center;z-index:6}
+  .spinner{width:64px;height:64px;border-radius:50%;border:6px solid rgba(167,11,19,.25);border-top-color:#a70b13;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .card{border:1px solid #e1e3e6;border-radius:12px;padding:14px;margin:10px 0;background:#fff;box-shadow:0 2px 10px rgba(16,21,28,.05)}
+  .brandbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:-14px -14px 14px -14px;color:#fff;background:linear-gradient(90deg,var(--brand),var(--brand2));border-radius:12px 12px 0 0}
+  .brandbar img{width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.6);background:#fff}
+  .brandbar h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}
+  .brandbar .muted{margin-left:auto;opacity:.95;font-weight:600}
+
+  .rpt-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:18px}
+  .propmap{grid-column:1 / -1}
+  .propmap-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;align-items:start}
+  .badge-pill{display:inline-block;border:1px solid #dadde2;border-radius:999px;padding:4px 10px;margin:4px 6px 0 0;background:#fafbfc}
+  .kv{margin-top:8px;font-size:14px;color:#333}.kv div{margin:4px 0}
+  img.map{max-width:100%;border:1px solid #e6e8ec;border-radius:10px}
+
+  .section-title{margin:0 0 10px;font-size:18px}
+  .overlay-header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .backbtn{display:inline-block;border:1px solid #d7d7d7;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;text-decoration:none;background:#f7f7f7}
+  .backbtn:hover{background:#eee}
+
+  .sumlist{margin:6px 0 0 18px;padding:0}.sumlist li{margin:8px 0 12px}
+  .note{margin-top:8px;font-size:13px;color:#7a0f16;font-weight:700}
+  .rpt-footer{margin-top:14px;padding-top:8px;border-top:1px dashed #ddd;font-size:12px;color:#555}
+
+  .leg{font-size:13px;line-height:1.35;margin-top:8px}
+  .leg .row{display:flex;align-items:center;gap:8px;margin:2px 0}
+  .leg .swbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;padding:1px;border:1px solid #999;border-radius:3px;overflow:hidden;background:#fff}
+  .leg .swbox img,.leg .swbox svg,.leg .swbox canvas{width:100%;height:100%;display:block;object-fit:contain}
+
+  @media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.card{page-break-inside:avoid}}
+
+  #rptOverlay{position:fixed;inset:0;display:none;z-index:9999;background:rgba(246,247,249,.94);backdrop-filter:saturate(1.2) blur(2px);place-items:center;padding:24px}
+  #rptCard{width:min(880px,92vw);border:1px solid #e6e8ec;border-radius:16px;background:#fff;box-shadow:0 20px 48px rgba(16,21,28,.12)}
+  #rptBrand{display:flex;align-items:center;gap:12px;color:#fff;background:linear-gradient(90deg,#a70b13,#7f0e15);padding:14px 16px;border-radius:16px 16px 0 0}
+  #rptBrand img{width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.6);background:#fff}
+  #rptBrand h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}
+  #rptBody{padding:16px}
+  #rptStatus{display:flex;align-items:center;gap:10px;color:#344054}
+  #rptRing{width:22px;height:22px;border:3px solid #e8e8ee;border-top-color:#a70b13;border-radius:50%;animation:spin 1s linear infinite}
+  #rptProgress{height:8px;background:#eef0f4;border-radius:999px;overflow:hidden;margin-top:10px}
+  #rptBar{height:100%;width:0%;background:linear-gradient(90deg,#a70b13,#df5056);transition:width .25s ease;border-radius:999px}
+  #rptSteps{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .rptStep{background:#fbfbfc;border:1px dashed #e2e4e8;border-radius:10px;padding:10px;font-size:12px;color:#475467}
+  .rptDone{border-color:#cfe6d2;background:#f2faf3;color:#1e7a31;font-weight:600}
+
+  #sumOverlays{max-height:320px;overflow:auto;padding-right:6px;scrollbar-width:thin;scrollbar-color:#c7cbd1 transparent}
+  #sumOverlays::-webkit-scrollbar{width:8px}
+  #sumOverlays::-webkit-scrollbar-thumb{background:#c7cbd1;border-radius:6px}
+  #sumOverlays::-webkit-scrollbar-track{background:transparent}
+</style>
+</head>
+<body>
+  <header>
+    <div class="brand">Gold Coast Interactive Mapping</div>
+    <div class="toolbar">
+      <button id="btnHome" class="btn linklike" title="Back to index">Home</button>
+      <button id="btnPrintReport" class="btn">Print Report</button>
+    </div>
+  </header>
+
+  <main>
+    <aside id="left">
+      <div class="tabs" role="tablist">
+        <button class="tab" id="tab-summary"  role="tab" aria-selected="true"  aria-controls="panel-summary">Summary</button>
+        
+      </div>
+
+      <section id="panel-summary" class="panel active" role="tabpanel" aria-labelledby="tab-summary">
+        <div class="card">
+          <h2 class="section-title">Property</h2>
+          <div class="kv">
+            <div><b>Lot/Plan:</b> <span id="sumLot">--</span></div>
+            <div><b>Area:</b> <span id="sumArea">-- m²</span></div>
+            <div><b>Class:</b> <span id="sumClass">--</span></div>
+            <div><b>Address:</b> <span id="sumAddress">--</span></div>
+            <div><b>Council:</b> <span id="sumCouncil">City of Gold Coast</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <h2 class="section-title">Overlays</h2>
+          <ul id="sumOverlays" class="sumlist"><li><i>Select a parcel…</i></li></ul>
+        </div>
+      </section>
+
+      <section id="panel-setbacks" class="panel" role="tabpanel" aria-labelledby="tab-setbacks">
+        <p>Setback tools are disabled in the Beta build.</p>
+      </section>
+
+      <section id="panel-proposal" class="panel" role="tabpanel" aria-labelledby="tab-proposal">
+        <p>Proposal drawing is disabled in the Beta build.</p>
+      </section>
+
+      <section id="panel-yield" class="panel" role="tabpanel" aria-labelledby="tab-yield">
+        <p>Yield calculator is disabled in the Beta build.</p>
+      </section>
+    </aside>
+
+    <div id="viewWrap">
+      <div id="viewDiv"></div>
+      <div id="loadingMask"><div class="spinner" aria-label="Loading…"></div></div>
+    </div>
+  </main>
+
+  <div id="statusBar">
+    <span id="statusCoords">Coords: --</span>
+    <span id="statusZoom">Zoom: --</span>
+    <span id="statusScale">Scale: --</span>
+  </div>
+
+  <div id="rptOverlay" aria-hidden="true">
+    <div id="rptCard">
+      <div id="rptBrand">
+        <img src="./images/Flavour icon.png" alt="Logo">
+        <h1>Gold Coast Interactive Mapping — Building report</h1>
+      </div>
+      <div id="rptBody">
+        <div id="rptStatus"><div id="rptRing"></div><div id="rptMsg">Starting…</div></div>
+        <div id="rptProgress"><div id="rptBar"></div></div>
+        <div id="rptSteps">
+          <div class="rptStep" id="rptS1">Locate parcel</div>
+          <div class="rptStep" id="rptS2">Resolve address</div>
+          <div class="rptStep" id="rptS3">Render overlays</div>
+          <div class="rptStep" id="rptS4">Compose document</div>
+        </div>
+        <div style="margin-top:10px;color:#667085;font-size:12px">Keep this tab visible while the report builds so map screenshots can render smoothly.</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
+    import WebMap from "https://js.arcgis.com/4.30/@arcgis/core/WebMap.js";
+    import MapView from "https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js";
+    import Graphic from "https://js.arcgis.com/4.30/@arcgis/core/Graphic.js";
+    import GraphicsLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js";
+    import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
+    import Expand from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Expand.js";
+    import ScaleBar from "https://js.arcgis.com/4.30/@arcgis/core/widgets/ScaleBar.js";
+    import Home from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Home.js";
+    import LayerList from "https://js.arcgis.com/4.30/@arcgis/core/widgets/LayerList.js";
+    import Legend from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Legend.js";
+    import BasemapGallery from "https://js.arcgis.com/4.30/@arcgis/core/widgets/BasemapGallery.js";
+    import Fullscreen from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Fullscreen.js";
+    import * as reactiveUtils from "https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js";
+    import * as geometryEngine from "https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js";
+    import * as symbolUtils from "https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js";
+    import * as locator from "https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js";
+    import esriConfig from "https://js.arcgis.com/4.30/@arcgis/core/config.js";
+
+    /* ---------------- Tunables ---------------- */
+    const TOUCH_BUFFER_M = 6;
+    const SWATCH_PX = 16;
+    const GEOCODER_URL = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer";
+    const GOLD_COAST_CENTER=[153.40609236458516,-28.023787883167135];
+    const GOLD_COAST_SCALE=564.248588;
+    const M2="m²";
+
+    const HOUSES_OUT = 3;
+    const HOUSE_LOT_METERS = 25;
+    const SCREEN_BUFFER_METERS = HOUSES_OUT * HOUSE_LOT_METERS;
+    const SHOT_SIZE = { width: 1280, height: 900 };
+
+    /* ---- CORS allow-list for address queries ---- */
+    const CORS_HOSTS = [
+      "cornerstonebc.maps.arcgis.com",
+      "services.arcgis.com",
+      "gisservices.information.qld.gov.au",
+      "gis.brisbane.qld.gov.au",
+      "maps.moretonbay.qld.gov.au",
+      "maps.goldcoast.qld.gov.au"
+    ];
+    CORS_HOSTS.forEach(h=>{
+      try{
+        const arr = esriConfig.request.corsEnabledServers;
+        if (!arr.includes(h)) arr.push(h);
+      }catch{}
+    });
+
+    /* ---------------- Small helpers ---------------- */
+    const $=id=>document.getElementById(id);
+    const setText=(id,t)=>{const el=$(id); if(el) el.textContent=t;};
+    const showLoading=on=>{const m=$("loadingMask"); if(m) m.style.display=on?"flex":"none";};
+    const raf=()=>new Promise(r=>requestAnimationFrame(()=>r()));
+    const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+    const waitViewIdle=async(extra=240)=>{try{await reactiveUtils.whenOnce(()=>!view.updating);}catch{} await raf(); await sleep(extra);};
+    const slug=s=>String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    const htmlEsc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+    function framedExtent(geom){
+      try{
+        const b=geometryEngine.buffer(geom,SCREEN_BUFFER_METERS,"meters");
+        return (b&&b.extent)?b.extent:(geom&&geom.extent);
+      }catch{return geom && geom.extent;}
+    }
+    async function withViewOnGeom(geom,fn){
+      const vp=view.viewpoint?.clone?.();
+      try{
+        if(geom?.extent){
+          const target=framedExtent(geom);
+          await view.goTo(target,{animate:false});
+          await waitViewIdle(260);
+        }
+        return await fn();
+      } finally {
+        if(vp){ try{ await view.goTo(vp,{animate:false}); await waitViewIdle(160);}catch{} }
+      }
+    }
+    const centroidOf = (g)=>{
+      try{
+        if (g?.centroid) return g.centroid;
+        if (g?.extent?.center) return g.extent.center;
+      }catch{}
+      return null;
+    };
+
+    /* ---------------- Map & rules ---------------- */
+    const portal=new Portal({url:"https://cornerstonebc.maps.arcgis.com"});
+    // Use your Gold Coast WebMap item
+    let webmap=new WebMap({portalItem:{id:"e328e4bae5ac44058080197a53c4d468",portal}});
+    const selLayer=new GraphicsLayer({listMode:"hide"}); webmap.add(selLayer);
+    // Start at your provided center/scale
+    const view=new MapView({container:"viewDiv",map:webmap,center:GOLD_COAST_CENTER,scale:GOLD_COAST_SCALE,constraints:{snapToZoom:false}});
+
+    const inText=(t,p="")=>String(t||"")+" "+String(p||"");
+    const isDNT=(title,id="",tags=[])=>{const t=String(title||""); const i=String(id||""); const tag=(tags||[]).join("|"); return /do[\s-]*not[\s-]*touch/i.test(t)||/do[\s-]*not[\s-]*touch/i.test(i)||/do[\s-]*not[\s-]*touch/i.test(tag);};
+    const isUtility=(title,id="",tags=[])=>/\b(utilit(y|ies)|power|electric|telecom|gas|water|sewer|storm[-\s]?water|reticulation|service)\b/i.test(inText(title,id)+" "+(tags||[]).join(" "));
+    const isWaterOrSewer=(path)=>/\b(water|sewer|storm[\s-]*water|drainage|watercourse)\b/i.test(String(path||""));
+    const isAcid=(t,p="")=>/\bacid\b/i.test(inText(t,p));
+    const isTransport=(t,p="")=>/\b(transport|road|rail|corridor|traffic|cycle|bikeway|pedestrian|carpark|parking|transit|bus|ferry)\b/i.test(inText(t,p));
+    const isAir=(t,p="")=>/\b(air\s*quality|air-quality|air|pollution)\b/i.test(inText(t,p));
+    const isNoise=(t,p="")=>/\b(noise|acoustic|transport.*noise.*corridor|tnc)\b/i.test(inText(t,p));
+    const isZoning=(t,p="")=>/\b(zoning|zone|zones)\b/i.test(inText(t,p));
+    const isBushfire=(t,p="")=>/\b(bush[-\s]?fire|bushfire|bush\s*fire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p));
+
+    const kidsOf=n=>(n.layers?.toArray?.()??n.layers)||(n.sublayers?.toArray?.()??n.sublayers)||[];
+    const nodePath=n=>{const bits=[]; let cur=n; while(cur){bits.unshift(cur.title||cur.id||"node"); cur=cur.parent;} return bits.join(" / ");};
+
+    function walkAny(node,cb,inheritedDNT=false){
+      if(!node) return;
+      const t=node.title||node.id||"", id=node.id||"", tg=node.portalItem?.tags||[];
+      const flag=inheritedDNT||isDNT(t,id,tg);
+      cb(node,flag);
+      (kidsOf(node)||[]).forEach(ch=>walkAny(ch,cb,flag));
+    }
+    function keepOnHidden(node){ if("visible"in node){try{node.visible=true;}catch{}} if("listMode"in node){try{node.listMode="hide";}catch{}} try{node.minScale=0;node.maxScale=0;}catch{} if(node.type==="sublayer"){ try{ node.updateFromJSON({minScale:0,maxScale:0}); }catch{} } let p=node.parent; while(p){ if("visible"in p){try{p.visible=true;}catch{}} p=p.parent; } }
+    function startHidden(node){ if("visible"in node){try{node.visible=false;}catch{}} if("listMode"in node){try{node.listMode="show";}catch{} }}
+    function enforceOverlayRules(){ walkAny(webmap,(node,underDNT)=>{ if(node.type==="graphics"){try{node.listMode="hide";}catch{} return;} if(!("visible"in node)) return; underDNT?keepOnHidden(node):startHidden(node); }); }
+    ;[300,900,1800,3500].forEach(ms=> setTimeout(()=>{ try{enforceOverlayRules();}catch{} },ms));
+    (async()=>{ showLoading(true); try{ await webmap.loadAll(); enforceOverlayRules(); }catch(e){ console.warn("WebMap auth/fail; fallback basemap",e); webmap=new WebMap({basemap:"streets-vector"}); webmap.add(selLayer); view.map=webmap; } finally{ showLoading(false);} })();
+
+    view.ui.add(new Home({view}),"top-left");
+    view.ui.add(new ScaleBar({view,unit:"metric"}),"bottom-left");
+    const layerList=new LayerList({view,listItemCreatedFunction(e){
+      const item=e.item, node=item.sublayer||item.layer;
+      if(!node) return;
+      if(node.type==="graphics"){ item.visible=false; item.panel=null; try{node.listMode="hide";}catch{} return; }
+      let cur=node, inDNT=false;
+      while(cur){ const t=cur.title||"", i=cur.id||"", tg=cur.portalItem?.tags||[]; if(isDNT(t,i,tg)){ inDNT=true; break; } cur=cur.parent; }
+      if(inDNT){ keepOnHidden(node); item.visible=false; item.panel=null; }
+      else{ try{node.listMode="show";}catch{} item.visible=true; item.panel={content:"legend"}; }
+    }});
+    view.ui.add(new Expand({view,content:layerList,expandIconClass:"esri-icon-layers",expanded:false}),"top-right");
+    view.ui.add(new Expand({view,content:new Legend({view}),expandIconClass:"esri-icon-legend"}),"top-right");
+    view.ui.add(new Expand({view,content:new BasemapGallery({view}),expandIconClass:"esri-icon-basemap"}),"top-right");
+    view.ui.add(new Fullscreen({view}),"top-right");
+
+    /* --- Search widget --- */
+    const search=new Search({
+      view,
+      includeDefaultSources:true,
+      popupEnabled:true,
+      allPlaceholder:"Search address or Lot/Plan (e.g., 12/SP12345)"
+    });
+    view.ui.add(search,{position:"top-right",index:0});
+
+    /* ---------------- Status ---------------- */
+    view.watch("extent",()=>{ const c=view.center; setText("statusCoords",`Coords: ${c.longitude.toFixed(5)}, ${c.latitude.toFixed(5)}`); setText("statusZoom",`Zoom: ${view.zoom.toFixed(1)}`); setText("statusScale",`Scale: 1:${Math.round(view.scale)}`); });
+
+    /* ---------------- Parcel selection ---------------- */
+    const parseNumberLike=raw=>{ if(raw==null) return null; let s=String(raw).trim(); if(!s) return null; const hasHA=/(^|[^a-z])ha([^a-z]|$)/i.test(s)||/\bhectare(s)?\b/i.test(s); s=s.replace(/,/g,"").replace(/square\s*met(re|er)s?/ig,"").replace(/m2|m\u00B2|sqm|sq\.?m/ig,"").trim(); let n=parseFloat(s); if(isNaN(n)) return null; if(hasHA) n*=10000; return n; };
+    function getLotAreaSqm(attrs){ const strong=["LOT_AREA_M2","LOT_SIZE_M2","LOT_SIZE_SQM","LOT_AREA_SQM","AREA_SQM","SITE_AREA_SQM","LAND_AREA_SQM","LOT_AREA","LOT_SIZE","SITE_AREA","LAND_AREA","AREA_M2","AREA (M2)","AREA(M2)","AREA_M^2","AREA_HA","HECTARES"]; for(const k of strong){ const v=k in attrs?parseNumberLike(attrs[k]):null; if(v!=null){ if(v>0&&v<50&&(k==="AREA_HA"||k==="HECTARES")) return v*10000; return v; } } for(const k2 in attrs){ const v2=attrs[k2]; if(/(lot|site|land).*area/i.test(k2)||/area.*(sqm|m2|m\^2|square)/i.test(k2)||(/(lot|site).*size/i.test(k2))){ const val=parseNumberLike(v2); if(val) return val; } } return null; }
+    function parseParcelMeta(attrs){ const keys=rx=>Object.keys(attrs).find(k=>rx.test(k)); const lot=attrs["LOT"]??attrs["LOTNO"]??attrs["LOT_NO"]??attrs["LOTNUMBER"]??(keys(/^lot[\w_]*$/i)&&String(attrs[keys(/^lot[\w_]*$/i)])); const plan=attrs["PLAN"]??attrs["PLANNO"]??attrs["PLAN_NO"]??(keys(/^plan[\w_]*$/i)&&String(attrs[keys(/^plan[\w_]*$/i)])); let lotplan=attrs["LOT_PLAN"]??attrs["LOT_PLAN_NO"]??attrs["LOTPLAN"]??attrs["LOTPLAN_NO"]??attrs["LOTPLAN_TXT"]??attrs["LOT_PLAN_TXT"]??attrs["LOT_PLAN_TEXT"]??attrs["LOTPLAN_TEXT"]; if(!lotplan && lot && plan) lotplan=lot+"/"+plan; if(!lotplan){ for(const key in attrs){ const s=String(attrs[key]||"").toUpperCase(); const m=s.match(/\b(\d+)\s*\/\s*([A-Z]{1,4}\s*\d{1,8})\b/); if(m){ lotplan=m[1]+"/"+m[2].replace(/\s+/g,""); break; } } } return {lot,plan,lotplan}; }
+    const geomAreaSqmSafe=g=>{ try{ const a=Math.abs(geometryEngine.planarArea(g,"square-meters")||0); return a>0?a:null; }catch{ return null; } };
+
+    function smartJoin(parts){ return parts.filter(Boolean).join(" ").replace(/\s+/g," ").trim(); }
+    const _get = (o, ks) => { for (const k of ks) if (k in o && String(o[k] ?? "").trim()) return String(o[k]).trim(); return null; };
+
+    function parseCouncil(attrs){
+      if(!attrs) return null;
+      const first=(...keys)=>{ for(const k of keys){ if(k in attrs){ const v=String(attrs[k]??"").trim(); if(v) return v; } } return null; };
+      return first("COUNCIL","COUNCIL_NAME","LGA","LGA_NAME","LOCAL_GOVERNMENT_AREA","AUTHORITY","ADMIN_BODY") || "City of Gold Coast";
+    }
+
+    /* ===== Address helpers ===== */
+    const ADDR_DEBUG = false;
+
+    const FULL_ADDR_FIELDS = [
+      "FULL_ADDRESS","ADDRESS_FULL","GNAF_FULL_ADDRESS","GNAF_ADDRESS",
+      "SITE_ADDRESS","PROPERTY_ADDRESS","PROP_ADDRESS","PRIMARY_ADDRESS",
+      "ADDR_FULL","ADDR_LABEL","ADDRESS","STREET_ADDRESS","POSTAL_ADDRESS",
+      "FULLADDR","FULL_ADD","FULL_ADDRE","SITE_ADDR","SITE_ADD","PROP_ADD",
+      "PROPERTY_ADDR","PROPERTY_ADD","ADDRESS1","ADDRESS_1","ADDR1"
+    ];
+
+    const PART_FIELDS = {
+      unit:  ["UNIT_NO","UNIT_NUMBER","UNIT","APARTMENT","FLAT","SUITE","SUB_UNIT","APT","FLAT_NO","UNITNO","UNITNUM"],
+      numP:  ["HOUSE_PREFIX","NUMBER_PREFIX","ADDR_NUM_PREFIX","NUMBER_PRE","NO_PRE","HSE_PRE"],
+      num:   ["HOUSE_NO","HOUSE_NUMBER","STREET_NO","STREET_NUMBER","PRIMARY_NO","PROPERTY_NO","NUMBER","HSE_NO","HSE_NUM","ADDR_NO"],
+      numS:  ["HOUSE_SUFFIX","NUMBER_SUFFIX","ADDR_NUM_SUFFIX","NUMBER_SUF","NO_SUF","HSE_SUF"],
+      stNm:  ["STREET_NAME","ST_NAME","ROAD_NAME","RD_NAME","ADD_STREET_NAME","STREET","ST_NAM","RD_NAM"],
+      stTp:  ["STREET_TYPE","ST_TYPE","ROAD_TYPE","RD_TYPE","ADDR_TYPE","ST_TYP","RD_TYP"],
+      stSf:  ["STREET_SUFFIX","ST_SUFFIX","ROAD_SUFFIX","RD_SUFFIX","ST_SUF","RD_SUF"],
+      suburb:["SUBURB","SUBURB_NAME","LOCALITY","LOCALITY_NAME","TOWN","CITY","SUB_NAME","LOCALITY_N"],
+      state: ["STATE","STATE_ABBR","STATE_CODE"],
+      post:  ["POSTCODE","POST_CODE","ZIP","PSTCODE","PST_CD"]
+    };
+
+    const LOTPLAN_FIELDS = [
+      "LOT_PLAN","LOT_PLAN_NO","LOTPLAN","LOTPLAN_NO","LOTPLAN_TXT","LOT_PLAN_TXT","LOT_PLAN_TEXT","LOTPLAN_TEXT"
+    ];
+
+    function _pick(attrs, keys){
+      for(const k of keys){
+        if(k in attrs){
+          const v = String(attrs[k] ?? "").trim();
+          if(v && v.toUpperCase()!=="NULL") return v;
+        }
+      }
+      return null;
+    }
+    const _smartJoin = smartJoin;
+
+    function buildAddressFromParts(attrs){
+      const unit=_pick(attrs,PART_FIELDS.unit);
+      const numP=_pick(attrs,PART_FIELDS.numP);
+      const num =_pick(attrs,PART_FIELDS.num);
+      const numS=_pick(attrs,PART_FIELDS.numS);
+      const stNm=_pick(attrs,PART_FIELDS.stNm);
+      const stTp=_pick(attrs,PART_FIELDS.stTp);
+      const stSf=_pick(attrs,PART_FIELDS.stSf);
+      const suburb=_pick(attrs,PART_FIELDS.suburb);
+      const state=_pick(attrs,PART_FIELDS.state) || "QLD";
+      const post =_pick(attrs,PART_FIELDS.post);
+
+      const line1=_smartJoin([ unit ? (unit+"/") : null, _smartJoin([numP,num,numS]), _smartJoin([stNm,stTp,stSf]) ]);
+      const line2=_smartJoin([ suburb, state, post ]);
+      return _smartJoin([line1,line2]) || null;
+    }
+
+    function parseAddress(attrs){
+      if(!attrs) return null;
+      for(const f of FULL_ADDR_FIELDS){
+        const v = attrs[f];
+        if(v!=null){
+          const s = String(v).trim();
+          if(s && s.toUpperCase()!=="NULL") return s;
+        }
+      }
+      for(const f of LOTPLAN_FIELDS){
+        const s = String(attrs[f] ?? "").trim();
+        if(/\d{1,5}\s+[A-Za-z].*\d{4}\b/.test(s)) return s;
+      }
+      const built = buildAddressFromParts(attrs);
+      if(built) return built;
+      for(const k in attrs){
+        const v = String(attrs[k]??"").trim();
+        if(!v) continue;
+        const m=v.match(/\b\d{1,5}\s+[A-Za-z][A-Za-z\s.'-]+(?:\b(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Cres|Court|Ct|Lane|Ln|Terrace|Ter|Way|Pde|Parade)\b)[^,;]*?(?:,\s*[A-Za-z][A-Za-z\s.'-]+)?(?:\s+(?:QLD|Queensland))?\s*\d{4}\b/i);
+        if(m) return m[0].replace(/\s+/g," ").trim();
+      }
+      return null;
+    }
+
+    function ensureSuburbInAddress(addr, attrs){
+      if(!addr) return addr;
+      const _p = (obj, keys)=>{
+        for(const k of keys){
+          if(k in obj){
+            const v=String(obj[k]??"").trim();
+            if(v && v.toUpperCase()!=="NULL") return v;
+          }
+        }
+        return null;
+      };
+      const suburb=_p(attrs||{}, PART_FIELDS.suburb);
+      const state=_p(attrs||{}, PART_FIELDS.state) || "QLD";
+      const post =_p(attrs||{}, PART_FIELDS.post);
+
+      if(!suburb) return addr;
+
+      const norm = s => String(s||"").toUpperCase().replace(/[,\s]+/g," ").trim();
+      if (norm(addr).includes(norm(suburb))) return addr;
+
+      const rxTail = new RegExp(String.raw`(?:,\s*)?(?:QLD|Queensland)\s*${post?String.raw`\b${post}\b`:''}\s*$`,"i");
+      const tailWanted = `${suburb} ${state}${post?` ${post}`:""}`;
+
+      if (rxTail.test(addr)){
+        return addr.replace(rxTail, `, ${tailWanted}`);
+      }
+      return `${addr.replace(/\s+,/g, ",")}, ${tailWanted}`;
+    }
+
+    function looksLikeAddressLayer(node){
+      const hay = ((node.title||"")+" "+nodePath(node)).toLowerCase();
+      return /\b(gnaf|address|addr|property\s*address|site\s*address|street\s*address|address\s*points|locality|suburb|road\s*centerline|road\s*centreline)\b/.test(hay);
+    }
+
+    async function scanAddressLayers(lotGeom){
+      const nodes = flattenFeatureNodes().filter(n=>{
+        try{ return looksLikeAddressLayer(n); }catch{return false;}
+      });
+      const centroid = centroidOf(lotGeom);
+      const candidates = [];
+
+      for(const n of nodes){
+        try{
+          await n.load();
+          const outFields = ["*"];
+
+          const r1 = await n.queryFeatures({
+            geometry: lotGeom, spatialRelationship: "intersects",
+            returnGeometry: false, outFields, maxRecordCountFactor: 3
+          });
+          (r1.features||[]).forEach(f=>{
+            const addr = parseAddress(f.attributes);
+            if(addr) candidates.push({addr, score: 3, layer:n});
+          });
+
+          if(centroid){
+            const r2 = await n.queryFeatures({
+              geometry: centroid, distance: 40, units: "meters",
+              spatialRelationship: "intersects", returnGeometry: false,
+              outFields, maxRecordCountFactor: 3
+            });
+            (r2.features||[]).forEach(f=>{
+              const addr = parseAddress(f.attributes);
+              if(addr) candidates.push({addr, score: 2, layer:n});
+            });
+          }
+        }catch(e){
+          if(ADDR_DEBUG) console.warn("Address layer failed:", n.title, e);
+        }
+      }
+
+      candidates.sort((a,b)=>
+        (b.score-a.score) ||
+        ((/\d/.test(b.addr)?1:0)-(/\d/.test(a.addr)?1:0)) ||
+        (b.addr.length-a.addr.length)
+      );
+      if(ADDR_DEBUG) console.log("Address candidates:", candidates);
+      return candidates.length ? candidates[0].addr : null;
+    }
+
+    async function resolveBestAddress(geom, parcelFeature){
+      let addr = parcelFeature ? parseAddress(parcelFeature.attributes||{}) : null;
+      const weak = !addr || addr.trim().length<=4 || /^[A-Z]{2,3}$/.test(addr.trim());
+
+      if(weak){
+        try{
+          const fromLayers = await scanAddressLayers(geom);
+          if(fromLayers) addr = fromLayers;
+        }catch(e){
+          if(ADDR_DEBUG) console.warn("scanAddressLayers error:", e);
+        }
+      }
+
+      if(!addr || addr.trim().length<=4){
+        try{
+          const cen = centroidOf(geom);
+          if(cen){
+            const res = await locator.locationToAddress(GEOCODER_URL,{location:cen});
+            addr = res?.address || res?.attributes?.Match_addr || res?.attributes?.LongLabel || res?.attributes?.Address || addr;
+          }
+        }catch(e){
+          if(ADDR_DEBUG) console.warn("reverse geocode failed:", e);
+        }
+      }
+
+      addr = ensureSuburbInAddress(addr, parcelFeature?.attributes || {});
+      return addr || "Address unavailable";
+    }
+
+    function flattenFeatureNodes(){ const out=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) out.push(n); }); return out; }
+    const looksLikeParcelLayer=node=>/(cadast|parcel|dcdb|lot|property)/i.test((node.title||"").toLowerCase());
+
+    async function findParcelAtPoint(point){
+      const all=flattenFeatureNodes().filter(n=>n.geometryType==="polygon");
+      const pref=[],rest=[]; for(const n of all){ try{ await n.load(); }catch{} (looksLikeParcelLayer(n)?pref:rest).push(n); }
+      const layers=[...pref,...rest];
+      const collect=async(opts)=>{ const out=[]; for(const L of layers){ try{ const r=await L.queryFeatures({...opts,returnGeometry:true,outFields:["*"],maxRecordCountFactor:2}); (r.features||[]).forEach(f=>out.push({layer:L,feature:f})); }catch{} } return out; };
+      let cand=await collect({geometry:point,spatialRelationship:"intersects"});
+      let contains=cand.filter(({feature})=>{ try{ return geometryEngine.contains(feature.geometry,point); }catch{ return false; } });
+      if(contains.length){
+        let best=contains[0], bestD=Infinity;
+        for(const c of contains){ let d=Infinity; try{ const cen=centroidOf(c.feature.geometry); d=geometryEngine.distance(point,cen)||Infinity; }catch{} if(d<bestD){ best=c; bestD=d; } }
+        return best.feature;
+      }
+      cand=await collect({geometry:point,distance:1.5,units:"meters",spatialRelationship:"intersects"});
+      if(cand.length){
+        let best=cand[0], bestD=Infinity;
+        for(const c of cand){ let d=Infinity; try{ const near=geometryEngine.nearestCoordinate(c.feature.geometry,point); d=near?.distance??Infinity; }catch{} if(d<bestD){ best=c; bestD=d; } }
+        return best.feature;
+      }
+      return null;
+    }
+
+    let lastParcelInfo={feature:null,lotText:"--",areaText:"-- "+M2,classText:"--",addressText:"--",councilText:"City of Gold Coast"};
+
+    function updateSummaryPanel(){
+      setText("sumLot", lastParcelInfo.lotText || "--");
+      setText("sumArea", lastParcelInfo.areaText || ("-- "+M2));
+      setText("sumClass", lastParcelInfo.classText || "--");
+      setText("sumAddress", lastParcelInfo.addressText || "--");
+      setText("sumCouncil", lastParcelInfo.councilText || "City of Gold Coast");
+    }
+
+    function outlineSelection(geom){
+      selLayer.removeAll();
+      if(!geom) return;
+      selLayer.add(new Graphic({geometry:geom,symbol:{type:"simple-fill",color:[0,0,0,0],outline:{color:"#a70b13",width:2}}}));
+    }
+    function parcelInfoFromFeature(feat){
+      const attrs=feat?.attributes||{};
+      const meta=parseParcelMeta(attrs);
+      const lotplan=meta.lotplan || ((meta.lot||meta.plan)?[meta.lot,meta.plan].filter(Boolean).join("/"):"--");
+      const area=getLotAreaSqm(attrs) ?? geomAreaSqmSafe(feat.geometry) ?? null;
+      const cls=(area!=null && area<450)?"Small lot":"Standard lot";
+      let address=parseAddress(attrs) || "--";
+      if(address && address!=="--") address = ensureSuburbInAddress(address, attrs);
+      const council=parseCouncil(attrs) || "City of Gold Coast";
+      return { lotText:lotplan||"--", areaText:area!=null?(Math.round(area).toLocaleString()+" "+M2):("-- "+M2), classText:cls, addressText:address, councilText:council };
+    }
+    function updateBadgesFromFeature(feat){
+      const info=parcelInfoFromFeature(feat);
+      if($("lotBadge")) $("lotBadge").textContent="Lot: "+info.lotText;
+      if($("areaBadge")) $("areaBadge").textContent="Area: "+info.areaText;
+      if($("classBadge")) $("classBadge").textContent="Class: "+info.classText;
+      lastParcelInfo={feature:feat,...info};
+      updateSummaryPanel();
+    }
+
+    const bufferedAOIFor=(node,geom)=>{ try{ const gt=(node.geometryType||"").toLowerCase(); if(gt==="point"||gt==="multipoint"||gt==="polyline") return geometryEngine.buffer(geom,TOUCH_BUFFER_M,"meters"); }catch{} return geom; };
+    async function countFeatures(node,geom){
+      const g=bufferedAOIFor(node,geom);
+      try{ if(typeof node.queryFeatureCount==="function"){ const c=await node.queryFeatureCount({geometry:g,spatialRelationship:"intersects"}); return Number(c)||0; } }catch{}
+      try{ if(typeof node.queryFeatures==="function"){ const q=await node.queryFeatures({geometry:g,spatialRelationship:"intersects",returnGeometry:false,outFields:["*"],num:1}); return q.features?.length?1:0; } }catch{}
+      return 0;
+    }
+    async function hideUnusedOverlaysFor(geom){
+      const nodes=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) nodes.push(n); });
+      for(const n of nodes){
+        const t=n.title||n.id||"", id=n.id||"", tg=n.portalItem?.tags||[];
+        if(isDNT(t,id,tg)) continue;
+        if(isUtility(t,id,tg)) continue;
+        if(isWaterOrSewer(nodePath(n))) continue;
+        try{ await n.load(); const cnt=await countFeatures(n,geom); if("listMode"in n) n.listMode=cnt>0?"show":"hide"; }catch{}
+      }
+      try{ layerList.refresh(); }catch{}
+    }
+
+    function underDNTChain(node){
+      let cur=node;
+      while(cur){
+        const t=cur.title||"", id=cur.id||"", tg=cur.portalItem?.tags||[];
+        if(isDNT(t,id,tg)) return true;
+        cur=cur.parent;
+      }
+      return false;
+    }
+
+    async function updateSideOverlaySummary(geom){
+      const ul = $("sumOverlays");
+      if (!ul) return;
+      ul.innerHTML = "<li><i>Scanning…</i></li>";
+
+      const items = [];
+      const nodes = flattenFeatureNodes().filter(n => !underDNTChain(n));
+
+      for (const n of nodes){
+        try{
+          const t = n.title || "", id = n.id || "", tg = n.portalItem?.tags || [];
+          const p = nodePath(n);
+          if (isUtility(t,id,tg) || isWaterOrSewer(p)) continue;
+
+          await n.load();
+
+          const cnt = await countFeatures(n, geom);
+          if (cnt <= 0) continue;
+
+          const { items: keys } = await legendFromRendererUsingFeatures(n, geom);
+          const keyHTML = keys.length
+            ? `<div class="leg" style="margin-top:4px">${keys.map(k =>
+                `<div class="row">${k.swatchHTML}${htmlEsc(k.label)}</div>`
+              ).join("")}</div>`
+            : "";
+
+          const title = htmlEsc(t || "Layer");
+          items.push(
+            `<li>
+               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span></div>
+               ${keyHTML}
+             </li>`
+          );
+        }catch{}
+      }
+
+      ul.innerHTML = items.length
+        ? items.join("")
+        : "<li><i>No overlays intersect this parcel.</i></li>";
+    }
+
+    view.on("click", async ev=>{
+      try{
+        showLoading(true);
+        const parcel=await findParcelAtPoint(ev.mapPoint);
+        if(!parcel){ selLayer.removeAll(); return; }
+        updateBadgesFromFeature(parcel);
+        outlineSelection(parcel.geometry);
+        await hideUnusedOverlaysFor(parcel.geometry);
+
+        try{
+          const addr=await resolveBestAddress(parcel.geometry, parcel);
+          lastParcelInfo.addressText=addr||lastParcelInfo.addressText;
+          updateSummaryPanel();
+        }catch{}
+
+        updateSideOverlaySummary(parcel.geometry);
+      } finally { showLoading(false); }
+    });
+
+    /* ---------------- Legend helpers ---------------- */
+    async function swatchHTML(symbol){
+      try{
+        const el=await symbolUtils.renderPreviewHTML(symbol,{size:[SWATCH_PX-2,SWATCH_PX-2]});
+        if(el.tagName?.toLowerCase()==="canvas"){ return `<span class="swbox"><img alt="" src="${el.toDataURL("image/png")}"></span>`; }
+        try{ el.setAttribute("width","100%"); el.setAttribute("height","100%"); }catch{}
+        return `<span class="swbox">${el.outerHTML}</span>`;
+      }catch{ return `<span class="swbox" style="background:#cfcfcf"></span>`; }
+    }
+    const guessLabelFromAttrs = attrs => {
+      if (!attrs) return null;
+      const patt = [/zone.*(name|type|desc|label|category|code)?/i, /(planning|scheme).*zone/i, /(zone|category|type|class|desc|label)/i];
+      for (const r of patt) {
+        const k = Object.keys(attrs).find(x => r.test(x));
+        if (k) {
+          const v = String(attrs[k] ?? "").trim();
+          if (v) return v;
+        }
+      }
+      return null;
+    };
+    function getUVInfo(renderer,attrs){
+      if(!renderer||!attrs) return null;
+      const fields=[renderer.field,renderer.field2,renderer.field3].filter(Boolean);
+      const delim=renderer.fieldDelimiter??", ";
+      if(!fields.length) return null;
+      const parts=fields.map(f=>attrs[f]); const key=parts.join(delim);
+      const infos=renderer.uniqueValueInfos||[];
+      let info=infos.find(u=>String(u.value)===String(key));
+      if(!info) info=infos.find(u=>Array.isArray(u.values)&&u.values.some(v=>String(v)===String(key)));
+      if(!info && fields.length===1){
+        info=infos.find(u=>String(u.value)===String(attrs[fields[0]]))||
+              infos.find(u=>Array.isArray(u.values)&&u.values.some(v=>String(v)===String(attrs[fields[0]])));
+      }
+      return info||null;
+    }
+    const ZONE_KEYS=["ZONE_CODE","ZONE","ZONE_NAME","ZONING","ZONE_LABEL","ZONE_DESC","ZONE_TYPE","ZONE_CATEGORY","PLANNING_ZONE"];
+    function pickZoneLabel(attrs){
+      if(!attrs) return null;
+      const code=String(attrs.ZONE_CODE ?? attrs.ZONE ?? "").trim();
+      const name=String(attrs.ZONE_NAME ?? attrs.ZONING ?? "").trim();
+      if(code && name) return `${code} – ${name}`;
+      for(const k of ZONE_KEYS){ const v=attrs[k]; if(v!=null && String(v).trim()) return String(v).trim(); }
+      return null;
+    }
+    async function legendFromRendererUsingFeatures(layerNode,lotGeom){
+      const gt=(layerNode.geometryType||"").toLowerCase();
+      const isZone=isZoning(layerNode.title||"",nodePath(layerNode));
+      const g=(gt==="point"||gt==="multipoint"||gt==="polyline") ? geometryEngine.buffer(lotGeom,TOUCH_BUFFER_M,"meters") : lotGeom;
+
+      let feats=[];
+      try{
+        const q=await layerNode.queryFeatures({geometry:g,spatialRelationship:"intersects",returnGeometry:true,outFields:["*"],maxRecordCountFactor:6});
+        feats=q.features||[];
+      }catch{}
+      if(!feats.length) return {items:[]};
+
+      const itemMap=new Map();
+      for(const f of feats){
+        const gph=new Graphic({geometry:f.geometry,attributes:f.attributes,layer:layerNode});
+        let sym=null;
+        try{ sym=await symbolUtils.getDisplayedSymbol(gph,view); }catch{}
+        if(!sym){
+          const r=layerNode.renderer; sym = r?.symbol || r?.defaultSymbol || f.symbol || null;
+        }
+        if(!sym) continue;
+
+        let label=isZone?pickZoneLabel(f.attributes):null;
+        if(!label){
+          const r=layerNode.renderer;
+          if(r?.type==="unique-value"){
+            const info=getUVInfo(r,f.attributes);
+            if(info) label=info.label ?? String(info.value ?? (info.values||[]).join(", "));
+          }else if(r?.type==="class-breaks" && r.field){
+            const v=Number(f.attributes?.[r.field]);
+            if(!Number.isNaN(v)){
+              const info=(r.classBreakInfos||[]).find(b=>{
+                const min=(b.minValue==null?-Infinity:b.minValue), max=(b.maxValue==null?Infinity:b.maxValue);
+                return v>=min && v<=max;
+              });
+              label=info?.label ?? (info ? `${info.minValue ?? ""} – ${info.maxValue ?? ""}` : null);
+            }
+          }
+          if(!label) label=r?.label || layerNode.title || guessLabelFromAttrs(f.attributes) || "Class";
+        }
+        const sw=await swatchHTML(sym);
+        if(!itemMap.has(label)) itemMap.set(label,{label,swatchHTML:sw});
+      }
+      return {items:[...itemMap.values()]};
+    }
+
+    /* ---------------- Report build ---------------- */
+    function saveVisibility(root){ const map=new Map(); walkAny(root,(n)=>{ if("visible"in n){ map.set(nodePath(n),{vis:!!n.visible,op:n.opacity,min:n.minScale,max:n.maxScale,blend:n.blendMode}); } }); return map; }
+    function restoreVisibility(root,snap){ walkAny(root,(n)=>{ if("visible"in n){ const k=nodePath(n); if(snap.has(k)){ const s=snap.get(k); try{n.visible=s.vis;}catch{} if("opacity"in n && s.op!==undefined){ try{n.opacity=s.op;}catch{} } if("blendMode"in n && s.blend!==undefined){ try{n.blendMode=s.blend;}catch{} } try{n.minScale=s.min;n.maxScale=s.max;}catch{} } } }); }
+    async function awaitRenderFor(nodes){
+      const owningLayer=node=>{let c=node; while(c && c.type==="sublayer") c=c.parent; return c && c.type!=="sublayer" ? c : null;};
+      const layers=[...new Set(nodes.map(n=>owningLayer(n)).filter(Boolean))];
+      const views=[]; for(const L of layers){ try{views.push(await view.whenLayerView(L));}catch{} }
+      if(views.length){ try{await reactiveUtils.whenOnce(()=>views.every(v=>v.updating===false));}catch{} }
+      await waitViewIdle(240);
+    }
+    async function countFeaturesSum(nodes,geom){ let t=0; for(const n of nodes){ t+=await countFeatures(n,geom); } return t; }
+
+    async function screenshotFor(nodes,title,lotGeom,legendOnLot=false,{forceAllVisible=false}={}){
+      if(!nodes?.length || !lotGeom) return null;
+
+      const present=forceAllVisible ? [...nodes] : [];
+      if(!forceAllVisible){ for(const n of nodes){ if(await countFeatures(n,lotGeom)>0) present.push(n); } }
+      if(!present.length && !forceAllVisible) return null;
+
+      const visSnap=saveVisibility(view.map), scaleSnap=new Map(), opSnap=new Map(), blendSnap=new Map();
+
+      try{
+        return await withViewOnGeom(lotGeom, async ()=>{
+          walkAny(view.map,(n)=>{
+            if(!("visible"in n)) return;
+            if(underDNTChain(n)) return;
+            try{ n.visible=false; }catch{}
+          });
+          try{ selLayer.visible=true; }catch{}
+
+          const targets = present.length ? present : nodes;
+
+          const ancestors=node=>{const out=[]; let p=node?.parent; while(p){out.push(p); p=p.parent;} return out;};
+          for(const n of targets){
+            for(const a of [n,...ancestors(n)]){
+              if(!("visible"in a)) continue;
+              try{ a.visible=true; }catch{}
+              if("minScale"in a || "maxScale"in a){
+                if(!scaleSnap.has(a)) scaleSnap.set(a,{min:a.minScale,max:a.maxScale});
+                try{ a.minScale=0; a.maxScale=0; }catch{}
+              }
+            }
+            if("blendMode"in n){ if(!blendSnap.has(n)) blendSnap.set(n,n.blendMode); }
+            if("opacity"in n){ if(!opSnap.has(n))    opSnap.set(n,n.opacity); }
+          }
+          await awaitRenderFor(targets);
+
+          const shot=await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height});
+
+          let legendGeom=lotGeom;
+          if(!legendOnLot){ try{ const onScr=geometryEngine.intersect(lotGeom,view.extent); if(onScr) legendGeom=onScr; }catch{} }
+
+          const legendParts=[];
+          for(const n of targets){
+            if(underDNTChain(n)) continue;
+            if(typeof n.queryFeatures!=="function" && typeof n.queryFeatureCount!=="function") continue;
+            const {items}=await legendFromRendererUsingFeatures(n,legendGeom);
+            if(items.length){
+              const inner=items.map(i=>`<div class="row">${i.swatchHTML}${i.label.replace(/&/g,"&amp;")}</div>`).join("");
+              legendParts.push(`<div style="margin-bottom:6px"><b>${(n.title||"Layer").replace(/&/g,"&amp;")}</b><div class="leg" style="margin-top:4px">${inner}</div></div>`);
+            }
+          }
+
+          const count=await countFeaturesSum(nodes,lotGeom);
+          return {title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,legendHTML:legendParts.join(""),count};
+        });
+      } finally {
+        for(const [n,op] of opSnap){ try{n.opacity=op;}catch{} }
+        for(const [n,bl] of blendSnap){ try{n.blendMode=bl;}catch{} }
+        for(const [n,sc] of scaleSnap){ try{n.minScale=sc.min;n.maxScale=sc.max;}catch{} }
+        restoreVisibility(view.map,visSnap);
+      }
+    }
+
+    function setRpt(msg,pct,doneStepId){
+      const bar=$("rptBar"), m=$("rptMsg");
+      if(m && msg!=null) m.textContent=msg;
+      if(bar && pct!=null) bar.style.width=Math.max(0,Math.min(100,pct))+"%";
+      if(doneStepId){ const step=$(doneStepId); if(step) step.classList.add("rptDone"); }
+    }
+
+    async function addMandatorySection(shots, title, collectorFn, geom, baseShot, emptyNote){
+      try{
+        const nodes = collectorFn();
+        if(nodes.length){
+          const s = await screenshotFor(nodes, title, geom, false, {forceAllVisible:true});
+          if(!s){ shots.push({title,id:"rpt-"+slug(title),dataUrl:baseShot.dataUrl,legendHTML:"",count:0,note:emptyNote}); }
+          else { if((s.count||0)===0) s.note=emptyNote; shots.push(s); }
+        }else{
+          shots.push({title,id:"rpt-"+slug(title),dataUrl:baseShot.dataUrl,legendHTML:"",count:0,note:emptyNote});
+        }
+      }catch(err){
+        console.warn("Mandatory section failed:", title, err);
+        shots.push({title,id:"rpt-"+slug(title),dataUrl:baseShot.dataUrl,legendHTML:"",count:0,note:emptyNote+" (layer unavailable)"});
+      }
+    }
+
+    function dedupeShotsByTitle(shots, title){
+      const target=(title||"").trim().toLowerCase();
+      if(!target) return;
+      let seen=false;
+      for(let i=shots.length-1;i>=0;i--){
+        const cur=(shots[i]?.title||"").trim().toLowerCase();
+        if(cur===target){
+          if(seen){ shots.splice(i,1); }
+          else{ seen=true; }
+        }
+      }
+    }
+
+    document.getElementById("btnPrintReport").addEventListener("click", async ()=>{
+      document.getElementById("rptOverlay").style.display="grid";
+      try{ await buildAndOpenReport(); } finally { document.getElementById("rptOverlay").style.display="none"; }
+    });
+
+    async function buildAndOpenReport(){
+      try{
+        showLoading(true);
+        setRpt("Locating parcel…", 12);
+        let geom=null, lotText="--", areaText="-- "+M2, classText="--", addressText="--", councilText="City of Gold Coast";
+        if(lastParcelInfo.feature){
+          geom=lastParcelInfo.feature.geometry; ({lotText,areaText,classText,addressText,councilText}=lastParcelInfo);
+        }else{
+          const probe=await findParcelAtPoint(view.center);
+          if(probe){ const info=parcelInfoFromFeature(probe); geom=probe.geometry; ({lotText,areaText,classText,addressText,councilText}=info); lastParcelInfo={feature:probe,...info}; }
+        }
+        setRpt("Parcel located", 18, "rptS1");
+
+        if(geom){
+          setRpt("Resolving address…", 25);
+          try{ addressText=await resolveBestAddress(geom,lastParcelInfo.feature); }catch{}
+          setRpt("Address resolved", 35, "rptS2");
+          lastParcelInfo.addressText = addressText || lastParcelInfo.addressText;
+        }
+
+        setRpt("Rendering base map…", 42);
+        const baseShot = geom
+          ? await withViewOnGeom(geom, async()=>{ try{selLayer.visible=true;}catch{}; await waitViewIdle(200); return await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height}); })
+          : await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height});
+
+        setRpt("Collecting overlays…", 55);
+        const cats = geom ? await (async()=>{
+          const out={zoning:[],utilities:[],acid:[],transport:[],air:[],noise:[],bushfire:[],others:[]};
+          const arr=[]; walkAny(view.map,(n,underDNT)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function") && !underDNT) arr.push(n); });
+          for(const n of arr){
+            try{
+              await n.load();
+              const cnt=await countFeatures(n,geom); if(!cnt) continue;
+              const t=n.title||"", p=nodePath(n);
+              if(isZoning(t,p)) out.zoning.push(n);
+              else if(isUtility(t,n.id,n.portalItem?.tags||[]) || isWaterOrSewer(p)) out.utilities.push(n);
+              else if(isAcid(t,p)) out.acid.push(n);
+              else if(isNoise(t,p)) out.noise.push(n);
+              else if(isTransport(t,p)) out.transport.push(n);
+              else if(isAir(t,p)) out.air.push(n);
+              else if(isBushfire(t,p)) out.bushfire.push(n);
+              else out.others.push(n);
+            }catch{}
+          }
+          return out;
+        })() : {zoning:[],utilities:[],acid:[],transport:[],air:[],noise:[],others:[]};
+
+        const shots=[];
+        const tasks=[
+          ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); }}],
+          ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",()=>[],geom,baseShot,"No bushfire Lv"); }],
+          ["Utilities", async()=>{ const all=[...cats.utilities]; if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
+          ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
+          ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
+          ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
+          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",()=>cats.noise,geom,baseShot,"No noise Lv"); }],
+          ["Other overlays", async()=>{
+            for (const n of cats.others) {
+              const t = n.title || "", p = nodePath(n);
+              if (/(bush\s*fire|bushfire|noise)/i.test(t) || /(bush\s*fire|bushfire|noise)/i.test(p)) continue;
+              const s = await screenshotFor([n], n.title || "Overlay", geom);
+              if (s) shots.push(s);
+            }
+          }]
+        ];
+        for(let i=0;i<tasks.length;i++){
+          const [name,fn]=tasks[i];
+          setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
+          await fn();
+        }
+        dedupeShotsByTitle(shots,"Transport Noise Corridor");
+        setRpt("Overlays rendered", 87, "rptS3");
+
+        setRpt("Composing document…", 93);
+        const now=new Date();
+        const fmt=d=> d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+        const esc=htmlEsc;
+        const logoSrc="./images/Flavour icon.png";
+
+        /* ==== Dynamic report name bits (address → title/file name) ==== */
+        var toFileSafe = function (s) {
+          return String(s)
+            .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+        };
+        var baseName = (addressText && addressText !== "--")
+          ? addressText
+          : ((lotText && lotText !== "--") ? ("Lot " + lotText) : "Property");
+        var reportDisplayTitle = baseName + " — Property Report";
+        var reportFileTitle    = toFileSafe(reportDisplayTitle);
+
+        const html=[];
+        html.push("<!doctype html><meta charset='utf-8'><title>", esc(reportFileTitle), "</title>");
+        html.push("<style>",
+          "body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px;color:#222;background:#f6f7f9}",
+          ".card{border:1px solid #e1e3e6;border-radius:12px;padding:14px;margin:10px 0;background:#fff;box-shadow:0 2px 10px rgba(16,21,28,.05)}",
+          ".brandbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:-14px -14px 14px -14px;color:#fff;background:linear-gradient(90deg,#a70b13,#7f0e15);border-radius:12px 12px 0 0}",
+          ".brandbar img{width:28px;height:28px;border:1px solid #ddd;background:#fff;border-radius:6px}",
+          ".brandbar h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}",
+          ".brandbar .muted{margin-left:auto;opacity:.95;font-weight:600}",
+          ".rpt-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:18px}",
+          ".propmap{grid-column:1 / -1}",
+          ".propmap-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;align-items:start}",
+          ".badge-pill{display:inline-block;border:1px solid #dadde2;border-radius:999px;padding:4px 10px;margin:4px 6px 0 0;background:#fafbfc}",
+          ".kv{margin-top:8px;font-size:14px;color:#333}.kv div{margin:4px 0}",
+          "img.map{max-width:100%;border:1px solid #e6e8ec;border-radius:10px}",
+          ".section-title{margin:0 0 10px;font-size:18px}",
+          ".overlay-header{display:flex;align-items:center;justify-content:space-between;gap:8px}",
+          ".backbtn{display:inline-block;border:1px solid #d7d7d7;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;text-decoration:none;background:#f7f7f7}.backbtn:hover{background:#eee}",
+          ".sumlist{margin:6px 0 0 18px;padding:0}.sumlist li{margin:8px 0 12px}",
+          ".note{margin-top:8px;font-size:13px;color:#7a0f16;font-weight:700}",
+          ".leg{font-size:13px;line-height:1.35;margin-top:8px}.leg .row{display:flex;align-items:center;gap:8px;margin:2px 0}",
+          ".leg .swbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;padding:1px;border:1px solid #999;border-radius:3px;overflow:hidden;background:#fff}",
+          ".leg .swbox img,.leg .swbox svg,.leg .swbox canvas{width:100%;height:100%;display:block;object-fit:contain}",
+          ".rpt-footer{margin-top:14px;padding-top:8px;border-top:1px dashed #ddd;font-size:12px;color:#555}",
+          "@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.card{page-break-inside:avoid}}",
+          "</style>");
+        html.push("<body>");
+        html.push("<div class='card brandbar'><img src='",logoSrc,"' alt='Logo'><h1>", esc(reportDisplayTitle), "</h1><div class='muted'>",fmt(now),"</div></div>");
+
+        html.push("<div class='rpt-grid'>");
+          html.push("<div class='card propmap'>",
+                      "<div class='propmap-grid'>",
+                        "<div>",
+                          "<h2 class='section-title'>Property</h2>",
+                          "<div class='badge-pill'>Lot: ",esc(lotText),"</div>",
+                          "<div class='badge-pill'>Area: ",esc(areaText),"</div>",
+                          "<div class='badge-pill'>Class: ",esc(classText),"</div>",
+                          "<div class='kv'>",
+                            "<div><b>Address:</b> ",esc(addressText),"</div>",
+                            "<div><b>Council:</b> ",esc(councilText),"</div>",
+                          "</div>",
+                          "<div id='summary' style='margin-top:14px'>",
+                            "<h2 class='section-title' style='margin-top:0'>Summary</h2>");
+                            if(shots.length){
+                              html.push("<ul class='sumlist'>");
+                              for(const s of shots){
+                                const ct=(s.count!=null)?(" ("+s.count+" feature"+(s.count===1?"":"s")+")"):"";
+                                html.push("<li><a class='sum-link' style='color:#7a0f16;font-weight:700;text-decoration:none' href='#",s.id,"'>",esc(s.title),"</a>",ct,(s.note?(" — "+esc(s.note)):""),"</li>");
+                              }
+                              html.push("</ul>");
+                            }else{
+                              html.push("<i>No overlays intersect this parcel (excluding DNT groups).</i>");
+                            }
+                          html.push("</div>",
+                        "</div>",
+                        "<div><h2 class='section-title'>Map</h2><img class='map' src='",baseShot.dataUrl,"' alt='Map'></div>",
+                      "</div>",
+                      "<div class='rpt-footer'>Generated by Gold Coast Interactive Mapping. Confirm against the current planning scheme and authoritative datasets before relying on this report.</div>",
+                    "</div>");
+        html.push("</div>");
+
+        for(const s of shots){
+          html.push("<div class='card' id='",s.id,"'>",
+            "<div class='overlay-header'><h2 class='section-title' style='margin:0'>",esc(s.title),"</h2><a class='backbtn' href='#summary'>Back to Summary ↑</a></div>",
+            "<img class='map' src='",s.dataUrl,"' alt='",esc(s.title),"'>",
+            (s.note ? "<div class='note'>"+esc(s.note)+"</div>" : ""),
+            "<div class='leg'>", (s.legendHTML || ""), "</div>",
+          "</div>");
+        }
+
+        html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>© City of Gold Coast — Gold Coast Interactive Mapping. Indicative only.</div>");
+        html.push("</body>");
+
+        const w=window.open("about:blank","_blank");
+        if(w){
+          w.document.open();
+          w.document.write(html.join(""));
+          w.document.close();
+          try { w.document.title = reportFileTitle; } catch(e){}
+          setTimeout(()=>{try{w.focus(); w.print();}catch{}},350);
+        }
+        setRpt("Done", 100, "rptS4");
+      }catch(e){ console.error(e); alert("Could not create report."); }
+      finally{ showLoading(false); }
+    }
+
+    /* ---------------- Tabs & Home ---------------- */
+    ;[["summary"],["setbacks"],["proposal"],["yield"]].forEach(([name])=>{
+      const t=$("tab-"+name), p=$("panel-"+name);
+      if(!t||!p) return;
+      t.addEventListener("click",()=>{
+        document.querySelectorAll(".tab").forEach(el=> el.setAttribute("aria-selected","false"));
+        document.querySelectorAll(".panel").forEach(el=> el.classList.remove("active"));
+        t.setAttribute("aria-selected","true"); p.classList.add("active");
+      });
+    });
+    $("btnHome").addEventListener("click",()=>{
+      fetch("Index.html",{method:"HEAD"}).then(()=>{ window.location.href="Index.html"; })
+        .catch(()=>{
+          if (history.length > 1) {
+            history.back();
+          } else {
+            window.location.href = "./";
+          }
+        });
+    });
+
+    /* ============================================================
+       === Lot/Plan Search source (QLD) ============================
+       ============================================================ */
+
+    function normalizePlanText(p){ return String(p||"").toUpperCase().replace(/\s+/g,""); }
+    function parseLotPlan(text){
+      if(!text) return null;
+      let s=String(text).toUpperCase();
+      s=s.replace(/[,]+/g," ").replace(/\bon\b/ig," ").replace(/\blot\b/ig," ").replace(/\s+/g," ").trim();
+      let m = s.match(/^\s*(\d+)\s*\/\s*([A-Z]{1,4}\s*\d{1,8})\s*$/);
+      if(m) return {lot:m[1], plan:normalizePlanText(m[2])};
+      m = s.match(/^\s*(\d+)\s+([A-Z]{1,4}\s*\d{1,8})\s*$/);
+      if(m) return {lot:m[1], plan:normalizePlanText(m[2])};
+      m = s.match(/^\s*([A-Z]{1,4}\s*\d{1,8})\s+(\d+)\s*$/);
+      if(m) return {lot:m[2], plan:normalizePlanText(m[1])};
+      return null;
+    }
+
+    let _parcelLayerCache=null;
+    async function getParcelLayers(){
+      if(_parcelLayerCache) return _parcelLayerCache;
+      const nodes=flattenFeatureNodes().filter(n=>{
+        try{
+          return n.geometryType==="polygon" && looksLikeParcelLayer(n);
+        }catch{return false;}
+      });
+      for(const n of nodes){ try{ await n.load(); }catch{} }
+      _parcelLayerCache=nodes;
+      return nodes;
+    }
+
+    function escSQL(s){ return String(s).replace(/'/g,"''"); }
+    function isIntegerField(f){ const t=String(f.type||"").toLowerCase(); return t.indexOf("integer")!==-1; }
+    function isTextField(f){ const t=String(f.type||"").toLowerCase(); return t.indexOf("string")!==-1; }
+
+    function buildLotPlanWhere(layer, lot, plan){
+      const flds = Array.isArray(layer.fields)?layer.fields:[];
+      const lotFields = flds.filter(f=>{
+        const nm = (f.name||"").toUpperCase();
+        if(/LOT_AREA/.test(nm)) return false;
+        return /\b(LOT|LOTNO|LOT_NO|LOTNUMBER|LOT_NUM|LOTNUM)\b/.test(nm) || /^LOT$/.test(nm);
+      });
+      const planFields = flds.filter(f=>{
+        const nm = (f.name||"").toUpperCase();
+        return /\b(PLAN|PLAN_NO|PLANNO|LOT_PLAN|LOTPLAN|LOT_PLAN_TXT|LOTPLAN_TXT)\b/.test(nm);
+      });
+
+      const lotClauses=[];
+      const lotNum = Number(lot);
+      for(const f of lotFields){
+        if(isIntegerField(f) && !Number.isNaN(lotNum)){
+          lotClauses.push(`${f.name}=${lotNum}`);
+        }else if(isTextField(f)){
+          lotClauses.push(`UPPER(${f.name}) LIKE '%${escSQL(String(lot).toUpperCase())}%'`);
+        }
+      }
+
+      const planClauses=[];
+      const planU = escSQL(plan.toUpperCase());
+      for(const f of planFields){
+        if(isTextField(f)){
+          planClauses.push(`UPPER(${f.name}) LIKE '%${planU}%'`);
+          if(/LOT[_ ]?PLAN|LOTPLAN|LOT_PLAN/i.test(f.name)){
+            planClauses.push(`UPPER(${f.name}) LIKE '%${escSQL((String(lot)+"/"+plan).toUpperCase())}%'`);
+          }
+        }
+      }
+
+      const parts=[];
+      if(lotClauses.length) parts.push("("+lotClauses.join(" OR ")+")");
+      if(planClauses.length) parts.push("("+planClauses.join(" OR ")+")");
+      if(!parts.length) return null;
+      return parts.join(" AND ");
+    }
+
+    async function queryLotPlanAcrossLayers(lot, plan){
+      const layers = await getParcelLayers();
+      const out=[];
+      for(const L of layers){
+        try{
+          const where = buildLotPlanWhere(L, lot, plan);
+          if(!where) continue;
+          const q = await L.queryFeatures({
+            where,
+            outFields:["*"],
+            returnGeometry:true,
+            maxRecordCountFactor:5
+          });
+          for(const f of (q.features||[])){
+            out.push({layer:L, feature:f});
+          }
+        }catch(e){ /* ignore per-layer errors */ }
+      }
+      return out;
+    }
+
+    const lotPlanSource = {
+      name: "Lot/Plan (QLD)",
+      placeholder: "12/SP12345 or 'Lot 12 on SP12345'",
+      getSuggestions: async (params)=>{
+        const p = parseLotPlan(params.text);
+        if(!p) return [];
+        return [{ key: p.lot+"/"+p.plan, text: "Lot "+p.lot+" on "+p.plan, sourceIndex: 0 }];
+      },
+      getResults: async (params)=>{
+        let txt = params.text || "";
+        if(params.suggestResult && params.suggestResult.key) txt = params.suggestResult.key;
+        const p = parseLotPlan(txt);
+        if(!p) return [];
+        const matches = await queryLotPlanAcrossLayers(p.lot, p.plan);
+        return matches.map((m)=>({
+          name: "Lot "+p.lot+" on "+p.plan+" — "+(m.layer.title||"Parcels"),
+          feature: m.feature,
+          extent: m.feature?.geometry?.extent
+        }));
+      },
+      zoomScale: 1000
+    };
+
+    search.sources.add(lotPlanSource);
+
+    search.on("select-result", async (e)=>{
+      try{
+        const feat = e.result && e.result.feature;
+        if(feat && feat.geometry && feat.geometry.type==="polygon"){
+          updateBadgesFromFeature(feat);
+          outlineSelection(feat.geometry);
+          await hideUnusedOverlaysFor(feat.geometry);
+          try{
+            const addr=await resolveBestAddress(feat.geometry, feat);
+            lastParcelInfo.addressText=addr||lastParcelInfo.addressText;
+            updateSummaryPanel();
+          }catch{}
+          updateSideOverlaySummary(feat.geometry);
+        }
+      }catch(err){ console.warn("select-result handler:", err); }
+    });
+
+  </script>
+
+</body>
+</html>

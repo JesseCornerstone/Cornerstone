@@ -4,11 +4,11 @@ const session = require('express-session');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const sql = require('mssql');
-const crypto = require('crypto'); // NEW: for generating secure tokens
+const crypto = require('crypto');
 
 const app = express();
 
-// ----- DB config (Azure SQL / SQL Server) -----
+// ---------- DB CONFIG (Azure SQL) ----------
 const dbConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -16,35 +16,34 @@ const dbConfig = {
   port: parseInt(process.env.DB_PORT || '1433', 10),
   database: process.env.DB_NAME,
   options: {
-    encrypt: true,               // required for Azure SQL
+    encrypt: true,
     trustServerCertificate: false
   }
 };
 
-// Create a single connection pool for the whole app
+// single connection pool
 const poolPromise = sql.connect(dbConfig);
 
-// Base URL for the BCC report page (where ?key=... links will land)
+// Where BCC.html lives (we append ?key=... to this)
 const REPORT_BASE_URL =
   process.env.REPORT_BASE_URL ||
   'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
 
-// ----- Middleware -----
+// ---------- MIDDLEWARE ----------
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests from our frontend origin(s), or no-origin (curl, same-origin fetch)
-    const allowed = (process.env.FRONTEND_ORIGIN || '').split(',').filter(Boolean);
+    const allowed = (process.env.FRONTEND_ORIGIN || '')
+      .split(',')
+      .map(x => x.trim())
+      .filter(Boolean);
 
-    if (!origin) {
-      // No origin (e.g. curl, server-side, or same-origin) – allow
+    // allow curl / same-origin / no Origin header
+    if (!origin) return cb(null, true);
+
+    if (!allowed.length || allowed.includes(origin)) {
       return cb(null, true);
     }
 
-    if (allowed.length === 0 || allowed.includes(origin)) {
-      return cb(null, true);
-    }
-
-    // If you need Squarespace here, add its origin into FRONTEND_ORIGIN in .env
     return cb(new Error('Not allowed by CORS: ' + origin));
   },
   credentials: true
@@ -64,7 +63,7 @@ app.use(session({
   }
 }));
 
-// ----- Helper: map DB row to safe user object -----
+// ---------- HELPERS ----------
 function mapUser(row) {
   if (!row) return null;
   return {
@@ -78,13 +77,23 @@ function mapUser(row) {
   };
 }
 
-// ----- Auth / user routes -----
+function generateToken(byteLength = 32) {
+  const buf = crypto.randomBytes(byteLength);
+  return buf
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+// ---------- BASIC / AUTH ROUTES ----------
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// Current user (used by API.me in your HTML)
+// Current user
 app.get('/api/me', async (req, res) => {
   try {
     if (!req.session.userId) {
@@ -93,7 +102,11 @@ app.get('/api/me', async (req, res) => {
     const pool = await poolPromise;
     const result = await pool.request()
       .input('id', sql.Int, req.session.userId)
-      .query('SELECT TOP 1 id, first_name, last_name, email, company, role, created_at FROM users WHERE id = @id');
+      .query(`
+        SELECT TOP 1 id, first_name, last_name, email, company, role, created_at
+        FROM users
+        WHERE id = @id
+      `);
 
     const user = mapUser(result.recordset[0]);
     return res.json({ user });
@@ -103,7 +116,7 @@ app.get('/api/me', async (req, res) => {
   }
 });
 
-// Register (used by /api/auth/register)
+// Register
 app.post('/api/auth/register', async (req, res) => {
   const { first_name, last_name, email, company, role, password } = req.body || {};
   if (!first_name || !last_name || !email || !password) {
@@ -113,7 +126,6 @@ app.post('/api/auth/register', async (req, res) => {
   try {
     const pool = await poolPromise;
 
-    // Check if email already exists
     const existing = await pool.request()
       .input('email', sql.NVarChar, email)
       .query('SELECT TOP 1 id FROM users WHERE email = @email');
@@ -139,7 +151,7 @@ app.post('/api/auth/register', async (req, res) => {
       `);
 
     const user = mapUser(insert.recordset[0]);
-    req.session.userId = user.id; // auto sign-in after register
+    req.session.userId = user.id;
     return res.json({ ok: true, user });
   } catch (err) {
     console.error('POST /api/auth/register error', err);
@@ -147,7 +159,7 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
-// Login (used by /api/auth/login)
+// Login
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
@@ -158,7 +170,11 @@ app.post('/api/auth/login', async (req, res) => {
     const pool = await poolPromise;
     const result = await pool.request()
       .input('email', sql.NVarChar, email)
-      .query('SELECT TOP 1 id, first_name, last_name, email, company, role, created_at, password_hash FROM users WHERE email = @email');
+      .query(`
+        SELECT TOP 1 id, first_name, last_name, email, company, role, created_at, password_hash
+        FROM users
+        WHERE email = @email
+      `);
 
     if (!result.recordset.length) {
       return res.status(401).json({ ok: false, error: 'Invalid email or password' });
@@ -179,7 +195,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Logout (used by /api/auth/logout)
+// Logout
 app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(err => {
     if (err) {
@@ -191,23 +207,13 @@ app.post('/api/auth/logout', (req, res) => {
   });
 });
 
-// ----- ONE-TIME REPORT TOKEN ENDPOINTS -----
-// Helper: generate a URL-safe random token
-function generateToken(byteLength = 32) {
-  const buf = crypto.randomBytes(byteLength);
-  return buf
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
-}
+// ---------- ONE-TIME TOKEN ROUTES ----------
 
 // POST /api/create-token
-// Body: { "email": "user@example.com", "orderId": "SQUARESPACE-ORDER-ID" }
+// body: { "email": "user@example.com", "orderId": "SQ-ORDER-ID" }
 app.post('/api/create-token', async (req, res) => {
   try {
     const { email, orderId } = req.body || {};
-
     if (!email || !orderId) {
       return res.status(400).send('Missing email or orderId.');
     }
@@ -240,13 +246,11 @@ app.post('/api/create-token', async (req, res) => {
 app.post('/api/finalise-token', async (req, res) => {
   try {
     const key = req.query.key;
-
     if (!key) {
       return res.status(400).send('Missing key.');
     }
 
     const pool = await poolPromise;
-
     const updateSql = `
       UPDATE dbo.ReportAccessTokens
       SET Used = 1,
@@ -261,9 +265,7 @@ app.post('/api/finalise-token', async (req, res) => {
       .query(updateSql);
 
     if (!result.rowsAffected || result.rowsAffected[0] === 0) {
-      return res
-        .status(400)
-        .send('This report link is invalid, expired, or already used.');
+      return res.status(400).send('This report link is invalid, expired, or already used.');
     }
 
     return res.sendStatus(200);
@@ -273,8 +275,7 @@ app.post('/api/finalise-token', async (req, res) => {
   }
 });
 
-// ----- Static front-end -----
-// Serve static front-end if you put files in ./public (BCC.html etc.)
+// ---------- STATIC FRONT-END ----------
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;

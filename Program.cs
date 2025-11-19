@@ -3,11 +3,27 @@ using System.Security.Cryptography;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Put your Azure SQL connection string in appsettings.json under "ConnectionStrings:DefaultConnection"
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+// 1) Get connection string (fail fast if missing)
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is missing.");
+
+// 2) Enable CORS so Squarespace JS can call this API
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy
+            .AllowAnyOrigin()   // later you can restrict to your Squarespace domain
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 
 var app = builder.Build();
 
+app.UseCors();
+
+// 3) Endpoint Squarespace will call after payment
 app.MapPost("/api/create-token", async (CreateTokenRequest req) =>
 {
     if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.OrderId))
@@ -15,10 +31,10 @@ app.MapPost("/api/create-token", async (CreateTokenRequest req) =>
         return Results.BadRequest("Missing email or order id.");
     }
 
-    // 1) Generate a random URL-safe token
+    // Generate a random URL-safe token
     var token = GenerateToken(32);
 
-    // 2) Insert into SQL
+    // Insert into SQL
     await using var conn = new SqlConnection(connectionString);
     await conn.OpenAsync();
 
@@ -36,7 +52,7 @@ app.MapPost("/api/create-token", async (CreateTokenRequest req) =>
         await cmd.ExecuteNonQueryAsync();
     }
 
-    // 3) Build report URL
+    // Build report URL
     var reportUrl =
         $"https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/report?key={token}";
 

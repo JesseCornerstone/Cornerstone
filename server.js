@@ -22,7 +22,7 @@ const dbConfig = {
   }
 };
 
-// Lazy connection pool – avoids crashing the app if SQL is down
+// Lazy connection pool
 let pool = null;
 async function getPool() {
   if (pool && pool.connected) return pool;
@@ -32,7 +32,8 @@ async function getPool() {
     return pool;
   } catch (err) {
     console.error('❌ DB connection error:', err);
-    return null; // routes will handle null and return 500
+    // DEBUG: rethrow so routes can see the real error
+    throw err;
   }
 }
 
@@ -42,7 +43,7 @@ const REPORT_BASE_URL =
   'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
 
 // ---------- MIDDLEWARE ----------
-app.use(cors()); // allow all origins (easy for Squarespace + testing)
+app.use(cors()); // allow all origins (Squarespace + testing)
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -111,11 +112,6 @@ app.get('/api/me', async (req, res) => {
     }
 
     const pool = await getPool();
-    if (!pool) {
-      return res
-        .status(500)
-        .json({ user: null, error: 'DB connection failed' });
-    }
 
     const result = await pool
       .request()
@@ -146,11 +142,6 @@ app.post('/api/auth/register', async (req, res) => {
 
   try {
     const pool = await getPool();
-    if (!pool) {
-      return res
-        .status(500)
-        .json({ ok: false, error: 'DB connection failed' });
-    }
 
     const existing = await pool
       .request()
@@ -200,11 +191,6 @@ app.post('/api/auth/login', async (req, res) => {
 
   try {
     const pool = await getPool();
-    if (!pool) {
-      return res
-        .status(500)
-        .json({ ok: false, error: 'DB connection failed' });
-    }
 
     const result = await pool
       .request()
@@ -263,9 +249,13 @@ app.post('/api/create-token', async (req, res) => {
       return res.status(400).send('Missing email or orderId.');
     }
 
-    const pool = await getPool();
-    if (!pool) {
-      return res.status(500).send('DB connection failed.');
+    let dbPool;
+    try {
+      dbPool = await getPool();
+    } catch (err) {
+      console.error('DB connection failed (thrown):', err);
+      // DEBUG: send the real SQL error back so you can see it in the browser
+      return res.status(500).send('DB connection failed: ' + err.message);
     }
 
     const token = generateToken(32);
@@ -275,7 +265,7 @@ app.post('/api/create-token', async (req, res) => {
       VALUES (@Token, @UserEmail, @PaymentId, DATEADD(HOUR, 24, SYSUTCDATETIME()));
     `;
 
-    await pool
+    await dbPool
       .request()
       .input('Token', sql.NVarChar(128), token)
       .input('UserEmail', sql.NVarChar(320), email)
@@ -305,9 +295,6 @@ app.post('/api/finalise-token', async (req, res) => {
     }
 
     const pool = await getPool();
-    if (!pool) {
-      return res.status(500).send('DB connection failed.');
-    }
 
     const updateSql = `
       UPDATE dbo.ReportAccessTokens

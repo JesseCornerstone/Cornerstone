@@ -9,25 +9,30 @@ const path = require('path');
 
 const app = express();
 
-// ---------- DB CONFIG (single Azure connection string) ----------
-const connectionString = process.env.SQL_CONNECTION_STRING;
+// ---------- DB CONFIG (Azure SQL) ----------
+const dbConfig = {
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  server: process.env.DB_SERVER,
+  port: parseInt(process.env.DB_PORT || '1433', 10),
+  database: process.env.DB_NAME,
+  options: {
+    encrypt: true,
+    trustServerCertificate: false
+  }
+};
 
-// Lazy pool using full connection string
+// Lazy connection pool – avoids crashing the app if SQL is down
 let pool = null;
-let poolErrorMessage = null;
-
 async function getPool() {
   if (pool && pool.connected) return pool;
   try {
-    pool = await sql.connect(connectionString);
-    poolErrorMessage = null;
+    pool = await sql.connect(dbConfig);
     console.log('✅ Connected to SQL');
     return pool;
   } catch (err) {
     console.error('❌ DB connection error:', err);
-    pool = null;
-    poolErrorMessage = err.message;
-    return null;
+    return null; // routes will handle null and return 500
   }
 }
 
@@ -37,21 +42,23 @@ const REPORT_BASE_URL =
   'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
 
 // ---------- MIDDLEWARE ----------
-app.use(cors()); // allow all origins for now (good for Squarespace + testing)
+app.use(cors()); // allow all origins (easy for Squarespace + testing)
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
-app.use(session({
-  name: 'cs_sess',
-  secret: process.env.SESSION_SECRET || 'change-me-in-prod',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    sameSite: process.env.COOKIE_SAME_SITE || 'lax',
-    secure: process.env.COOKIE_SECURE === 'true'
-  }
-}));
+app.use(
+  session({
+    name: 'cs_sess',
+    secret: process.env.SESSION_SECRET || 'change-me-in-prod',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: process.env.COOKIE_SAME_SITE || 'lax',
+      secure: process.env.COOKIE_SECURE === 'true'
+    }
+  })
+);
 
 // ---------- HELPERS ----------
 function mapUser(row) {
@@ -76,6 +83,7 @@ function generateToken(byteLength = 32) {
     .replace(/=+$/g, '');
 }
 
+// Optional: log unhandled errors instead of silently killing the app
 process.on('unhandledRejection', err => {
   console.error('UNHANDLED REJECTION:', err);
 });
@@ -90,27 +98,9 @@ app.get('/api/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-// Health
+// Health check - just returns ok (no DB)
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
-});
-
-// TEMP: test DB connection directly, show message in browser
-app.get('/api/db-test', async (req, res) => {
-  try {
-    const pool = await getPool();
-    if (!pool) {
-      return res.status(500).json({
-        ok: false,
-        message: poolErrorMessage || 'Pool is null (no SQL connection).'
-      });
-    }
-    const result = await pool.request().query('SELECT DB_NAME() AS db, SYSTEM_USER AS userName');
-    return res.json({ ok: true, info: result.recordset[0] });
-  } catch (err) {
-    console.error('DB test error:', err);
-    return res.status(500).json({ ok: false, message: err.message });
-  }
 });
 
 // Current user
@@ -122,10 +112,13 @@ app.get('/api/me', async (req, res) => {
 
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).json({ user: null, error: poolErrorMessage || 'DB connection failed' });
+      return res
+        .status(500)
+        .json({ user: null, error: 'DB connection failed' });
     }
 
-    const result = await pool.request()
+    const result = await pool
+      .request()
       .input('id', sql.Int, req.session.userId)
       .query(`
         SELECT TOP 1 id, first_name, last_name, email, company, role, created_at
@@ -143,28 +136,37 @@ app.get('/api/me', async (req, res) => {
 
 // Register
 app.post('/api/auth/register', async (req, res) => {
-  const { first_name, last_name, email, company, role, password } = req.body || {};
+  const { first_name, last_name, email, company, role, password } =
+    req.body || {};
   if (!first_name || !last_name || !email || !password) {
-    return res.status(400).json({ ok: false, error: 'Missing required fields' });
+    return res
+      .status(400)
+      .json({ ok: false, error: 'Missing required fields' });
   }
 
   try {
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).json({ ok: false, error: poolErrorMessage || 'DB connection failed' });
+      return res
+        .status(500)
+        .json({ ok: false, error: 'DB connection failed' });
     }
 
-    const existing = await pool.request()
+    const existing = await pool
+      .request()
       .input('email', sql.NVarChar, email)
       .query('SELECT TOP 1 id FROM users WHERE email = @email');
 
     if (existing.recordset.length) {
-      return res.status(400).json({ ok: false, error: 'Email already registered' });
+      return res
+        .status(400)
+        .json({ ok: false, error: 'Email already registered' });
     }
 
     const hash = await bcrypt.hash(password, 10);
 
-    const insert = await pool.request()
+    const insert = await pool
+      .request()
       .input('first_name', sql.NVarChar, first_name)
       .input('last_name', sql.NVarChar, last_name)
       .input('email', sql.NVarChar, email)
@@ -191,16 +193,21 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
-    return res.status(400).json({ ok: false, error: 'Email and password required' });
+    return res
+      .status(400)
+      .json({ ok: false, error: 'Email and password required' });
   }
 
   try {
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).json({ ok: false, error: poolErrorMessage || 'DB connection failed' });
+      return res
+        .status(500)
+        .json({ ok: false, error: 'DB connection failed' });
     }
 
-    const result = await pool.request()
+    const result = await pool
+      .request()
       .input('email', sql.NVarChar, email)
       .query(`
         SELECT TOP 1 id, first_name, last_name, email, company, role, created_at, password_hash
@@ -209,13 +216,17 @@ app.post('/api/auth/login', async (req, res) => {
       `);
 
     if (!result.recordset.length) {
-      return res.status(401).json({ ok: false, error: 'Invalid email or password' });
+      return res
+        .status(401)
+        .json({ ok: false, error: 'Invalid email or password' });
     }
 
     const row = result.recordset[0];
     const match = await bcrypt.compare(password, row.password_hash);
     if (!match) {
-      return res.status(401).json({ ok: false, error: 'Invalid email or password' });
+      return res
+        .status(401)
+        .json({ ok: false, error: 'Invalid email or password' });
     }
 
     const user = mapUser(row);
@@ -242,6 +253,7 @@ app.post('/api/auth/logout', (req, res) => {
 // ---------- ONE-TIME TOKEN ROUTES ----------
 
 // Create token from Squarespace order
+// Body: { "email": "user@example.com", "orderId": "SQUARESPACE-ORDER-ID" }
 app.post('/api/create-token', async (req, res) => {
   try {
     const { email, orderId } = req.body || {};
@@ -253,7 +265,7 @@ app.post('/api/create-token', async (req, res) => {
 
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).send('DB connection failed: ' + (poolErrorMessage || 'no details'));
+      return res.status(500).send('DB connection failed.');
     }
 
     const token = generateToken(32);
@@ -263,7 +275,8 @@ app.post('/api/create-token', async (req, res) => {
       VALUES (@Token, @UserEmail, @PaymentId, DATEADD(HOUR, 24, SYSUTCDATETIME()));
     `;
 
-    await pool.request()
+    await pool
+      .request()
       .input('Token', sql.NVarChar(128), token)
       .input('UserEmail', sql.NVarChar(320), email)
       .input('PaymentId', sql.NVarChar(100), orderId)
@@ -281,6 +294,7 @@ app.post('/api/create-token', async (req, res) => {
 });
 
 // Finalise (use) a token after printing
+// POST /api/finalise-token?key=...
 app.post('/api/finalise-token', async (req, res) => {
   try {
     const key = req.query.key;
@@ -292,7 +306,7 @@ app.post('/api/finalise-token', async (req, res) => {
 
     const pool = await getPool();
     if (!pool) {
-      return res.status(500).send('DB connection failed: ' + (poolErrorMessage || 'no details'));
+      return res.status(500).send('DB connection failed.');
     }
 
     const updateSql = `
@@ -304,7 +318,8 @@ app.post('/api/finalise-token', async (req, res) => {
         AND ExpiresAt > SYSUTCDATETIME();
     `;
 
-    const result = await pool.request()
+    const result = await pool
+      .request()
       .input('Token', sql.NVarChar(128), key)
       .query(updateSql);
 
@@ -322,6 +337,8 @@ app.post('/api/finalise-token', async (req, res) => {
 });
 
 // ---------- STATIC FRONT-END ----------
+
+// Serve everything from /public (e.g. BCC.html, index.html, etc.)
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;

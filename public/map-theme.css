@@ -337,7 +337,7 @@ aside#left {
 .search-dock {
   border-radius: 16px !important;
   background: rgba(20, 21, 25, 0.78) !important;
-  color: #f9f9fb !important;
+  color: #000000 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45) !important;
 }

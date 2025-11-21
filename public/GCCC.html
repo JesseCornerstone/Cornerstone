@@ -521,11 +521,28 @@
     }
 
     function flattenFeatureNodes(){ const out=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) out.push(n); }); return out; }
-    const looksLikeParcelLayer=node=>/(cadast|parcel|dcdb|lot|property)/i.test((node.title||"").toLowerCase());
+    const PARCEL_FIELD_RX=/\b(LOT(?:_?PLAN)?|LOTNO|LOT_NO|LOTNUMBER|LOT_NUM|LOTNUM|PLAN|PLAN_NO|PLANNO|LOT_PLAN|LOTPLAN|LOT_PLAN_TXT|LOTPLAN_TXT|PARCEL|PARCEL_ID|PROP(?:ERTY)?_?ID?)\b/i;
+    function hasParcelFields(node){
+      try{
+        const flds=node.fields||[];
+        return flds.some(f=>PARCEL_FIELD_RX.test(String(f.name||"")));
+      }catch{return false;}
+    }
+    const looksLikeParcelLayer=node=>{
+      const hay=((node.title||"")+" "+nodePath(node)+" "+(node.url||"")).toLowerCase();
+      return /(cadast|parcel|dcdb|lot|property)/i.test(hay);
+    };
 
     async function findParcelAtPoint(point){
-      const all=flattenFeatureNodes().filter(n=>n.geometryType==="polygon");
-      const pref=[],rest=[]; for(const n of all){ try{ await n.load(); }catch{} (looksLikeParcelLayer(n)?pref:rest).push(n); }
+      const all=flattenFeatureNodes();
+      const pref=[],rest=[];
+      for(const n of all){
+        try{
+          await n.load();
+          if(n.geometryType!=="polygon") continue;
+          (looksLikeParcelLayer(n)||hasParcelFields(n)?pref:rest).push(n);
+        }catch{}
+      }
       const layers=[...pref,...rest];
       const collect=async(opts)=>{ const out=[]; for(const L of layers){ try{ const r=await L.queryFeatures({...opts,returnGeometry:true,outFields:["*"],maxRecordCountFactor:2}); (r.features||[]).forEach(f=>out.push({layer:L,feature:f})); }catch{} } return out; };
       let cand=await collect({geometry:point,spatialRelationship:"intersects"});
@@ -759,7 +776,64 @@
       return {items:[...itemMap.values()]};
     }
 
-    /* ---------------- Report build ---------------- */
+    const HARDWIRED = {
+      bushfire: [
+        /bush\s*fire/i, /bushfire/i, /bush-?fire/i, /wild\s*fire/i, /bpa\b/i,
+        /bushfire\s*prone/i, /bushfire\s*hazard/i, /qfes/i
+      ],
+      noise: [
+        /transport\s*noise\s*corridor/i, /tnc\b/i, /state.*road.*noise/i,
+        /road.*traffic.*noise/i, /tmr.*noise/i, /acoustic.*corridor/i
+      ]
+    };
+    function strHay(node){ return ((node.title||"")+" "+nodePath(node)+" "+(node.url||"")).toLowerCase(); }
+
+    function leafDisplayNodes(root){
+      const out=[];
+      const visit=(n)=>{
+        const kids=(kidsOf(n)||[]);
+        if(kids.length){ kids.forEach(visit); }
+        else{ if("visible" in n) out.push(n); }
+      };
+      visit(root);
+      return out;
+    }
+
+    function collectLeafDisplayNodesByPredicate(pred, {includeDNT=false}={}){
+      const out=[], seen=new Set();
+      const pushUnique=(node)=>{
+        if(!node || !("visible" in node)) return;
+        const key=nodePath(node)||node.id||node.title||"node";
+        if(seen.has(key)) return;
+        seen.add(key);
+        out.push(node);
+      };
+      walkAny(view.map,(n,underDNT)=>{
+        if(!includeDNT && underDNT) return;
+        const t=n.title||"", p=nodePath(n), id=n.id||"", tg=n.portalItem?.tags||[];
+        if(!pred(n,t,p,id,tg)) return;
+        const kids=kidsOf(n)||[];
+        if(kids.length){ leafDisplayNodes(n).forEach(pushUnique); }
+        else{ pushUnique(n); }
+      });
+      return out;
+    }
+
+    function collectAllBushfireDisplayNodes(){
+      return collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=>{
+        const hay=strHay(n);
+        return HARDWIRED.bushfire.some(rx=>rx.test(hay)) || isBushfire(t,p);
+      },{includeDNT:true});
+    }
+    function collectAllNoiseDisplayNodes(){
+      return collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=>{
+        const hay=strHay(n);
+        return HARDWIRED.noise.some(rx=>rx.test(hay)) || isNoise(t,p);
+      },{includeDNT:true});
+    }
+
+    
+/* ---------------- Report build ---------------- */
     function saveVisibility(root){ const map=new Map(); walkAny(root,(n)=>{ if("visible"in n){ map.set(nodePath(n),{vis:!!n.visible,op:n.opacity,min:n.minScale,max:n.maxScale,blend:n.blendMode}); } }); return map; }
     function restoreVisibility(root,snap){ walkAny(root,(n)=>{ if("visible"in n){ const k=nodePath(n); if(snap.has(k)){ const s=snap.get(k); try{n.visible=s.vis;}catch{} if("opacity"in n && s.op!==undefined){ try{n.opacity=s.op;}catch{} } if("blendMode"in n && s.blend!==undefined){ try{n.blendMode=s.blend;}catch{} } try{n.minScale=s.min;n.maxScale=s.max;}catch{} } } }); }
     async function awaitRenderFor(nodes){
@@ -924,12 +998,12 @@
         const shots=[];
         const tasks=[
           ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); }}],
-          ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",()=>[],geom,baseShot,"No bushfire Lv"); }],
+          ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",collectAllBushfireDisplayNodes,geom,baseShot,"No bushfire Lv"); }],
           ["Utilities", async()=>{ const all=[...cats.utilities]; if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } }],
           ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
           ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
           ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
-          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",()=>cats.noise,geom,baseShot,"No noise Lv"); }],
+          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",collectAllNoiseDisplayNodes,geom,baseShot,"No noise Lv"); }],
           ["Other overlays", async()=>{
             for (const n of cats.others) {
               const t = n.title || "", p = nodePath(n);
@@ -1094,14 +1168,18 @@
     let _parcelLayerCache=null;
     async function getParcelLayers(){
       if(_parcelLayerCache) return _parcelLayerCache;
-      const nodes=flattenFeatureNodes().filter(n=>{
+      const candidates=flattenFeatureNodes();
+      const polys=[];
+      for(const n of candidates){
         try{
-          return n.geometryType==="polygon" && looksLikeParcelLayer(n);
-        }catch{return false;}
-      });
-      for(const n of nodes){ try{ await n.load(); }catch{} }
-      _parcelLayerCache=nodes;
-      return nodes;
+          await n.load();
+          if(n.geometryType==="polygon" && (looksLikeParcelLayer(n) || hasParcelFields(n))){
+            polys.push(n);
+          }
+        }catch{}
+      }
+      _parcelLayerCache=polys;
+      return polys;
     }
 
     function escSQL(s){ return String(s).replace(/'/g,"''"); }
@@ -1132,11 +1210,18 @@
 
       const planClauses=[];
       const planU = escSQL(plan.toUpperCase());
+      const planCompact = escSQL(plan.toUpperCase().replace(/[^A-Z0-9]/g,""));
+      const lotPlanFull = escSQL((String(lot)+"/"+plan).toUpperCase());
+      const lotPlanCompact = escSQL((String(lot)+plan).toUpperCase().replace(/[^A-Z0-9]/g,""));
       for(const f of planFields){
         if(isTextField(f)){
-          planClauses.push(`UPPER(${f.name}) LIKE '%${planU}%'`);
+          const fieldExpr = `UPPER(${f.name})`;
+          const scrubExpr = `REPLACE(REPLACE(REPLACE(${fieldExpr},' ',''),'-',''),'/','')`;
+          planClauses.push(`${fieldExpr} LIKE '%${planU}%'`);
+          planClauses.push(`${scrubExpr} LIKE '%${planCompact}%'`);
           if(/LOT[_ ]?PLAN|LOTPLAN|LOT_PLAN/i.test(f.name)){
-            planClauses.push(`UPPER(${f.name}) LIKE '%${escSQL((String(lot)+"/"+plan).toUpperCase())}%'`);
+            planClauses.push(`${fieldExpr} LIKE '%${lotPlanFull}%'`);
+            planClauses.push(`${scrubExpr} LIKE '%${lotPlanCompact}%'`);
           }
         }
       }

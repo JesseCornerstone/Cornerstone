@@ -1,0 +1,362 @@
+@import url("https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&display=swap");
+
+:root {
+  --map-bg: #111214;
+  --map-panel: #1b1c20;
+  --map-panel-2: #262628;
+  --map-border: #2b2c33;
+  --map-ink: #f5f5f8;
+  --map-muted: #9ea1ab;
+  --map-accent: #c03b41;
+  --map-accent-dark: #9e2c32;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: var(--map-bg);
+  color: var(--map-ink);
+  font-family: "Cabin", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 22px 48px 18px;
+  background: #161617;
+  border-bottom: none;
+  box-shadow: none;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  position: relative;
+  padding-left: 84px;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.32em;
+  color: #f7f7f8;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.brand::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: #0f0f0f url("./images/Flavour icon.png") center/60% no-repeat;
+  box-shadow: none;
+}
+
+.brand::after {
+  content: "CornerstonePlus • Property Searches";
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  color: #8f919a;
+}
+
+.toolbar {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+}
+
+.btn {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: transparent;
+  color: #f3f3f4;
+  padding: 10px 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.btn.linklike {
+  border: none;
+  color: #c6c8ce;
+}
+
+.btn.linklike:hover {
+  color: #ffffff;
+  border: none;
+  background: transparent;
+}
+
+#btnPrintReport {
+  border-color: var(--map-accent);
+  background: var(--map-accent);
+  color: #ffffff;
+}
+
+#btnPrintReport:hover {
+  background: #d1464f;
+  border-color: #d1464f;
+}
+
+main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: clamp(320px, 27vw, 440px) minmax(0, 1fr);
+  gap: 28px;
+  padding: 32px;
+  background: #161617;
+}
+
+aside#left {
+  background: var(--map-panel);
+  border: 1px solid var(--map-border);
+  border-radius: 10px;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.side-heading {
+  padding: 22px 24px 8px;
+  background: #1f2024;
+  border-bottom: 1px solid #2b2c33;
+}
+
+.side-heading-title {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: #f5f5f8;
+  text-align: center;
+}
+
+.tabs {
+  padding: 12px 24px 20px;
+  background: #161617;
+  border-bottom: 1px solid #262628;
+}
+
+.tab {
+  width: 100%;
+  border: none;
+  border-radius: 24px;
+  padding: 12px 0 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.4em;
+  font-size: 12px;
+  color: #ffffff;
+  background: #c03b41;
+  cursor: default;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+.panel {
+  padding: 24px;
+  display: none;
+  color: var(--map-ink);
+}
+
+.panel.active {
+  display: block;
+}
+
+.card {
+  border-radius: 20px;
+  background: #1f2025;
+  border: 1px solid var(--map-border);
+  padding: 10px;
+  margin-bottom: 20px;
+  box-shadow: none;
+}
+
+.section-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  letter-spacing: 0.3em;
+  color: #c9cbd3;
+}
+
+.kv b {
+  color: var(--map-muted);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.kv span {
+  color: #ffffff;
+}
+
+#sumOverlays {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+
+#sumOverlays li {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+#sumOverlays li:last-child {
+  border-bottom: none;
+}
+
+.sumlist i {
+  color: var(--map-muted);
+}
+
+#viewWrap {
+  position: relative;
+  border: 1px solid var(--map-border);
+  border-radius: 10px;
+  box-shadow: none;
+  overflow: hidden;
+  background: #0b0c0f;
+}
+
+#statusBar {
+  display: flex;
+  gap: 32px;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 12px 32px;
+  background: #0f0f12;
+  border-top: 1px solid #262628;
+  color: var(--map-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+  font-size: 11px;
+}
+
+#contextBar {
+  background: var(--map-panel);
+  border-bottom: 1px solid var(--map-border);
+  color: var(--map-muted);
+}
+
+#loadingMask {
+  background: rgba(12, 12, 14, 0.95);
+}
+
+.spinner {
+  border-color: rgba(255, 255, 255, 0.15);
+  border-top-color: var(--map-accent);
+}
+
+#rptOverlay {
+  background: rgba(5, 5, 6, 0.85);
+  backdrop-filter: blur(4px);
+}
+
+#rptCard {
+  border: 1px solid #3a3938;
+  background: #262628;
+  color: #f5f5f8;
+  border-radius: 16px;
+  padding-bottom: 10px;
+}
+
+#rptBrand {
+  background: #3a3938;
+  border-bottom: 1px solid #2b2a2a;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.28em;
+}
+
+#rptBrand h1 {
+  font-size: 13px;
+  letter-spacing: 0.3em;
+}
+
+#rptStatus {
+  color: #f5f5f8;
+  font-weight: 500;
+}
+
+#rptProgress {
+  background: #1a1a1d;
+  border-radius: 999px;
+  border: 1px solid #3a3938;
+}
+
+#rptBar {
+  background: linear-gradient(90deg, #c03b41, #f04d57);
+}
+
+#rptSteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.rptStep {
+  background: #3a3938;
+  border: 1px solid #3a3a3a;
+  color: #ffffff;
+  border-radius: 14px;
+  text-align: center;
+  padding: 10px;
+}
+
+.rptDone {
+  background: #262628;
+  border-color: #3b3b3b;
+  color: #3b3b3b;
+}
+
+.esri-widget,
+.esri-widget__content,
+.esri-popup,
+.esri-ui .esri-component,
+.search-dock {
+  border-radius: 16px !important;
+  background: rgba(20, 21, 25, 0.78) !important;
+  color: #f9f9fb !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45) !important;
+}
+
+.esri-widget__heading,
+.esri-popup__header-title {
+  font-family: "Cabin", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  color: #ffffff !important;
+}
+
+.esri-popup__footer,
+.esri-popup__button {
+  background: transparent !important;
+}
+
+.esri-popup__button {
+  color: var(--map-ink) !important;
+}
+
+.esri-ui-corner .esri-component {
+  margin: 8px !important;
+}

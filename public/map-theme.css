@@ -335,7 +335,7 @@ aside#left {
 .esri-popup,
 .esri-ui .esri-component,
 .search-dock {
-  border-radius: 16px !important;
+  border-radius: 0px !important;
   background: rgba(20, 21, 25, 0.78) !important;
   color: #000000 !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;

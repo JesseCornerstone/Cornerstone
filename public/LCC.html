@@ -311,7 +311,12 @@
     const isUtility=function(title,id,tags){ return /\b(utilit(y|ies)|power|electric|telecom|gas|water|sewer|storm[-\s]?water|reticulation|service)\b/i.test(inText(title,id)+" "+(tags||[]).join(" ")); };
     const isWaterOrSewer=function(path){ return /\b(water|sewer|storm[\s-]*water|drainage|watercourse)\b/i.test(String(path||"")); };
     const isAcid=function(t,p){ return /\bacid\b/i.test(inText(t,p)); };
-    const isTransport=function(t,p){ return /\b(transport|road|rail|corridor|traffic|cycle|bikeway|pedestrian|carpark|parking|transit|bus|ferry)\b/i.test(inText(t,p)); };
+      const isTransport=function(t,p){
+        const hay=inText(t,p);
+        if(/\b(transport|road|rail|traffic|cycle|bikeway|pedestrian|carpark|parking|transit|bus|ferry)\b/i.test(hay)) return true;
+        if(/\bcorridor\b/i.test(hay) && !/\b(water|waterway|wetland|bio|biodiversity|habitat|conservation|vegetation|riparian|environment|green)\b/i.test(hay)) return true;
+        return false;
+      };
     const isAir=function(t,p){ return /\b(air\s*quality|air-quality|air|pollution)\b/i.test(inText(t,p)); };
     const isNoise=function(t,p){ return /\b(noise|acoustic|transport.*noise.*corridor|tnc)\b/i.test(inText(t,p)); };
     const isZoning=function(t,p){ return /\b(zoning|zone|zones)\b/i.test(inText(t,p)); };
@@ -587,7 +592,20 @@
       });
       return out;
     }
-    const looksLikeParcelLayer=function(node){ return /(cadast|parcel|dcdb|lot|property)/i.test(String(node.title||"").toLowerCase()); };
+    const PARCEL_FIELD_RX=/\b(LOT(?:_?PLAN)?|LOTNO|LOT_NO|LOTNUMBER|LOT_NUM|LOTNUM|PLAN|PLAN_NO|PLANNO|LOT_PLAN|LOTPLAN|LOT_PLAN_TXT|LOTPLAN_TXT|PARCEL|PARCEL_ID|PROP(?:ERTY)?_?ID?)\b/i;
+    function hasParcelFields(node){
+      try{
+        const flds=node.fields||[];
+        for(let i=0;i<flds.length;i++){
+          if(PARCEL_FIELD_RX.test(String(flds[i].name||""))) return true;
+        }
+      }catch(e){}
+      return false;
+    }
+    const looksLikeParcelLayer=function(node){
+      const hay=((node.title||"")+" "+nodePath(node)+" "+(node.url||"")).toLowerCase();
+      return /(cadast|parcel|dcdb|lot|property)/i.test(hay);
+    };
 
     async function scanAddressLayers(lotGeom){
       const nodes = flattenFeatureNodes().filter(function(n){ try{ return looksLikeAddressLayer(n); }catch(e){return false;} });
@@ -664,12 +682,15 @@
     }
 
     async function findParcelAtPoint(point){
-      const all=flattenFeatureNodes().filter(function(n){ return n.geometryType==="polygon"; });
+      const all=flattenFeatureNodes();
       const pref=[],rest=[];
       for(var i=0;i<all.length;i++){
         var n=all[i];
-        try{ await n.load(); }catch(e){}
-        (looksLikeParcelLayer(n)?pref:rest).push(n);
+        try{
+          await n.load();
+          if(n.geometryType!=="polygon") continue;
+          (looksLikeParcelLayer(n)||hasParcelFields(n)?pref:rest).push(n);
+        }catch(e){}
       }
       const layers=pref.concat(rest);
       const collect=async function(opts){
@@ -1317,12 +1338,19 @@
     let _parcelLayerCache=null;
     async function getParcelLayers(){
       if(_parcelLayerCache) return _parcelLayerCache;
-      const nodes=flattenFeatureNodes().filter(function(n){
-        try{ return n.geometryType==="polygon" && looksLikeParcelLayer(n); }catch(e){return false;}
-      });
-      for(var i=0;i<nodes.length;i++){ try{ await nodes[i].load(); }catch(e){} }
-      _parcelLayerCache=nodes;
-      return nodes;
+      const candidates=flattenFeatureNodes();
+      const polys=[];
+      for(var i=0;i<candidates.length;i++){
+        var node=candidates[i];
+        try{
+          await node.load();
+          if(node.geometryType==="polygon" && (looksLikeParcelLayer(node) || hasParcelFields(node))){
+            polys.push(node);
+          }
+        }catch(e){}
+      }
+      _parcelLayerCache=polys;
+      return polys;
     }
 
     function escSQL(s){ return String(s).replace(/'/g,"''"); }
@@ -1354,12 +1382,19 @@
 
       const planClauses=[];
       const planU = escSQL(plan.toUpperCase());
+      const planCompact = escSQL(plan.toUpperCase().replace(/[^A-Z0-9]/g,""));
+      const lotPlanFull = escSQL((String(lot)+"/"+plan).toUpperCase());
+      const lotPlanCompact = escSQL((String(lot)+plan).toUpperCase().replace(/[^A-Z0-9]/g,""));
       for(var j=0;j<planFields.length;j++){
         var f2=planFields[j];
         if(isTextField(f2)){
-          planClauses.push("UPPER(" + f2.name + ") LIKE '%" + planU + "%'");
+          var fieldExpr = "UPPER(" + f2.name + ")";
+          var scrubExpr = "REPLACE(REPLACE(REPLACE(" + fieldExpr + ", ' ', ''), '-', ''), '/', '')";
+          planClauses.push(fieldExpr + " LIKE '%" + planU + "%'");
+          planClauses.push(scrubExpr + " LIKE '%" + planCompact + "%'");
           if(/LOT[_ ]?PLAN|LOTPLAN|LOT_PLAN/i.test(f2.name)){
-            planClauses.push("UPPER(" + f2.name + ") LIKE '%" + escSQL((String(lot)+"/"+plan).toUpperCase()) + "%'");
+            planClauses.push(fieldExpr + " LIKE '%" + lotPlanFull + "%'");
+            planClauses.push(scrubExpr + " LIKE '%" + lotPlanCompact + "%'");
           }
         }
       }

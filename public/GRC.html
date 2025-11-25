@@ -15,15 +15,16 @@
 <link rel="dns-prefetch" href="//cornerstonebc.maps.arcgis.com">
 
 <!-- Preload + load ArcGIS ESM theme CSS -->
-<link rel="preload" as="style" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css" crossorigin>
-<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css" crossorigin>
+<link rel="preload" as="style" href="https://js.arcgis.com/4.34/@arcgis/core/assets/esri/themes/light/main.css" crossorigin>
+<link rel="stylesheet" href="https://js.arcgis.com/4.34/@arcgis/core/assets/esri/themes/light/main.css" crossorigin>
 
 <!-- Modulepreload a few critical ArcGIS modules (optional micro-wins) -->
-<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/WebMap.js" crossorigin>
-<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js" crossorigin>
-<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js" crossorigin>
-<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js" crossorigin>
-<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.34/@arcgis/core/WebMap.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.34/@arcgis/core/widgets/Search.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.34/@arcgis/core/core/reactiveUtils.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.34/@arcgis/core/geometry/geometryEngine.js" crossorigin>
+
+<script type="module" src="https://js.arcgis.com/4.34/embeddable-components/"></script>
 
 <style>
   :root{ --brand:#a70b13; --brand2:#7f0e15; --bg:#f6f7f9; --ink:#0b0d12; --border:#e1e3e6; --radius:14px; --shadow:0 6px 18px rgba(16,21,28,.08); }
@@ -162,7 +163,15 @@
     </aside>
 
     <div id="viewWrap">
-      <div id="viewDiv"></div>
+      <arcgis-embedded-map
+        id="viewDiv"
+        style="position:absolute;inset:0"
+        item-id="762617ab3faa404c92db4bc63940ba79"
+        theme="dark"
+        center="152.66754287711825,-26.175740872901628"
+        scale="1128.4971765"
+        portal-url="https://cornerstonebc.maps.arcgis.com">
+      </arcgis-embedded-map>
       <div id="loadingMask"><div class="spinner" aria-label="Loading…"></div></div>
     </div>
   </main>
@@ -195,23 +204,20 @@
 
   <script type="module">
     /* ---------------- ArcGIS imports ---------------- */
-    import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
-    import WebMap from "https://js.arcgis.com/4.30/@arcgis/core/WebMap.js";
-    import MapView from "https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js";
-    import Graphic from "https://js.arcgis.com/4.30/@arcgis/core/Graphic.js";
-    import GraphicsLayer from "https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js";
-    import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
-    import * as reactiveUtils from "https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js";
-    import * as geometryEngine from "https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js";
-    import * as symbolUtils from "https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js";
-    import * as locator from "https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js";
-    import esriConfig from "https://js.arcgis.com/4.30/@arcgis/core/config.js";
+    import WebMap from "https://js.arcgis.com/4.34/@arcgis/core/WebMap.js";
+    import Graphic from "https://js.arcgis.com/4.34/@arcgis/core/Graphic.js";
+    import GraphicsLayer from "https://js.arcgis.com/4.34/@arcgis/core/layers/GraphicsLayer.js";
+    import Search from "https://js.arcgis.com/4.34/@arcgis/core/widgets/Search.js";
+    import * as reactiveUtils from "https://js.arcgis.com/4.34/@arcgis/core/core/reactiveUtils.js";
+    import * as geometryEngine from "https://js.arcgis.com/4.34/@arcgis/core/geometry/geometryEngine.js";
+    import * as symbolUtils from "https://js.arcgis.com/4.34/@arcgis/core/symbols/support/symbolUtils.js";
+    import * as locator from "https://js.arcgis.com/4.34/@arcgis/core/rest/locator.js";
+    import esriConfig from "https://js.arcgis.com/4.34/@arcgis/core/config.js";
 
     /* ---------------- Tunables ---------------- */
     const TOUCH_BUFFER_M = 6;
     const SWATCH_PX = 16;
     const GEOCODER_URL = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer";
-    const GYMPIE=[152.66754287711825,-26.175740872901628];
     const M2="m²";
 
     // “3 houses out”
@@ -273,16 +279,27 @@
     };
 
     /* ---------------- Map & rules ---------------- */
-    const portal=new Portal({url:"https://cornerstonebc.maps.arcgis.com"});
-    let webmap=new WebMap({portalItem:{id:"762617ab3faa404c92db4bc63940ba79",portal}});
-    const selLayer=new GraphicsLayer({listMode:"hide"}); webmap.add(selLayer);
-    const view=new MapView({
-      container:"viewDiv",
-      map:webmap,
-      center:GYMPIE,
-      scale:1128.4971765,
-      constraints:{snapToZoom:false}
-    });
+    async function waitForEmbeddedView(){
+      await customElements.whenDefined("arcgis-embedded-map");
+      const component=document.getElementById("viewDiv");
+      if(!component) throw new Error("Embedded map element #viewDiv not found");
+      if(component.view) return component.view;
+      return new Promise((resolve)=>{
+        const onReady=(event)=>{
+          if(event?.detail?.ready && event.detail.view){
+            component.removeEventListener("arcgisViewReadyChange", onReady);
+            resolve(event.detail.view);
+          }
+        };
+        component.addEventListener("arcgisViewReadyChange", onReady);
+      });
+    }
+
+    const view=await waitForEmbeddedView();
+    let webmap=view.map;
+    const selLayer=new GraphicsLayer({listMode:"hide"});
+    view.map.add(selLayer);
+    try{ view.constraints.snapToZoom=false; }catch{}
 
     // Will be set later by lazy loader; referenced in a try/catch where needed
     let layerList;
@@ -347,13 +364,13 @@
           {default: BasemapGallery},
           {default: Fullscreen}
         ] = await Promise.all([
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Expand.js"),
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/ScaleBar.js"),
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Home.js"),
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/LayerList.js"),
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Legend.js"),
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/BasemapGallery.js"),
-          import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Fullscreen.js")
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/Expand.js"),
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/ScaleBar.js"),
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/Home.js"),
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/LayerList.js"),
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/Legend.js"),
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/BasemapGallery.js"),
+          import("https://js.arcgis.com/4.34/@arcgis/core/widgets/Fullscreen.js")
         ]);
 
         view.ui.add(new Home({view}),"top-left");
@@ -636,7 +653,7 @@
     /* --------- FIXED: choose the actual lot, not a larger polygon ---------- */
     async function findParcelAtPoint(point) {
       // Load all polygon layers so we can inspect their fields
-      const all = flattenFeatureNodes().filter(n => n.geometryType === "polygon");
+      const all = flattenFeatureNodes();
       const strong = [], weak = [], rest = [];
 
       for (const n of all) {
@@ -1333,7 +1350,7 @@
     async function getParcelLayers(){
       if(_parcelLayerCache) return _parcelLayerCache;
       // Load candidates, then keep those that look like parcel layers by fields or title
-      const candidates = flattenFeatureNodes().filter(n => n.geometryType==="polygon");
+      const candidates = flattenFeatureNodes();
       const out=[];
       for(const n of candidates){
         try{
@@ -1373,11 +1390,18 @@
 
       const planClauses=[];
       const planU = escSQL(plan.toUpperCase());
+      const planCompact = escSQL(plan.toUpperCase().replace(/[^A-Z0-9]/g,""));
+      const lotPlanFull = escSQL((String(lot)+"/"+plan).toUpperCase());
+      const lotPlanCompact = escSQL((String(lot)+plan).toUpperCase().replace(/[^A-Z0-9]/g,""));
       for(const f of planFields){
         if(isTextField(f)){
-          planClauses.push(`UPPER(${f.name}) LIKE '%${planU}%'`);
+          const fieldExpr = `UPPER(${f.name})`;
+          const scrubExpr = `REPLACE(REPLACE(REPLACE(${fieldExpr},' ',''),'-',''),'/','')`;
+          planClauses.push(`${fieldExpr} LIKE '%${planU}%'`);
+          planClauses.push(`${scrubExpr} LIKE '%${planCompact}%'`);
           if(/LOT[_ ]?PLAN|LOTPLAN|LOT_PLAN/i.test(f.name)){
-            planClauses.push(`UPPER(${f.name}) LIKE '%${escSQL((String(lot)+"/"+plan).toUpperCase())}%'`);
+            planClauses.push(`${fieldExpr} LIKE '%${lotPlanFull}%'`);
+            planClauses.push(`${scrubExpr} LIKE '%${lotPlanCompact}%'`);
           }
         }
       }

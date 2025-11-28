@@ -38,6 +38,7 @@
 <link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js" crossorigin>
 <link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js" crossorigin>
 <link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/config.js" crossorigin>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <!-- ===== End performance hints ===== -->
 
 <style>
@@ -56,12 +57,31 @@
   .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:4px 10px;font-size:12px}
 
   main{flex:1;min-height:520px;display:grid;grid-template-columns:clamp(280px,24vw,420px) 1fr;gap:12px;padding:12px}
-  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:auto;scrollbar-width:thin;scrollbar-color:#c7cbd1 transparent}
+  #left::-webkit-scrollbar{ width: 8px; }
+  #left::-webkit-scrollbar-thumb{ background:#c7cbd1; border-radius:6px; }
+  #left::-webkit-scrollbar-track{ background:transparent; }
   #viewWrap{position:relative;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   #viewDiv{position:absolute;inset:0}
 
   .panel{display:none;padding:12px}
   .panel.active{display:block}
+.pod-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+  .pod-form input[type="file"]{display:none}
+  .pod-upload-row{display:flex;align-items:center;gap:10px}
+  .pod-upload-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;border-radius:12px;border:1px solid #d0d4dc;background:#fff;color:var(--ink);font-weight:600;font-size:13px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 3px rgba(0,0,0,.08)}
+  .pod-upload-btn:hover{border-color:#b3b9c6;background:#f7f9fc}
+  .pod-file-name{font-size:13px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pod-form .btn.full{width:100%;text-align:center}
+.pod-status{font-size:12px;color:#4b5563;margin-top:6px;min-height:18px}
+.pod-status.error{color:#b42318}
+  .pod-results{margin-top:10px;border-top:1px solid var(--border);padding-top:8px;max-height:200px;overflow-y:auto;overflow-x:hidden}
+  .pod-results ul{margin:0;padding-left:18px;font-size:13px}
+  .pod-details summary{cursor:pointer;font-weight:600;font-size:15px;list-style:none}
+  .pod-details summary::-webkit-details-marker{display:none}
+  .pod-details summary::after{content:"▾";float:right;font-size:12px;color:#666}
+  .pod-details[open] summary::after{content:"▴"}
+  .pod-details{max-height:280px;overflow:auto}
 
   #statusBar{display:flex;gap:24px;align-items:center;padding:6px 16px;background:#fff;border-top:1px solid var(--border);color:#555;font-size:12px}
 
@@ -159,6 +179,25 @@
           <h2 class="section-title">Overlays</h2>
           <ul id="sumOverlays" class="sumlist"><li><i>Select a parcel…</i></li></ul>
         </div>
+        <div class="card" id="podUploadCard">
+          <details class="pod-details" id="podDetails">
+            <summary>POD Import </summary>
+            <p style="margin-top:10px;font-size:13px;color:#4b5563">Upload a POD PDF to auto-detect subdivisions. ArcGIS uploads will be enabled next.</p>
+            <form id="podForm" class="pod-form">
+              <div class="pod-upload-row">
+                <label for="podFile" class="pod-upload-btn">Choose file</label>
+                <div id="podFileName" class="pod-file-name">No file chosen</div>
+              </div>
+              <input type="file" id="podFile" accept="application/pdf" required>
+              <button type="submit" id="podSubmitBtn" class="btn full">Upload &amp; Import</button>
+            </form>
+            <div id="podStatus" class="pod-status">Select a POD PDF to begin.</div>
+            <div id="podResultWrap" class="pod-results" hidden>
+              <strong style="font-size:13px;display:block;margin-bottom:4px">Detected Subdivisions</strong>
+              <ul id="podResultList"></ul>
+            </div>
+          </details>
+        </div>
       </section>
 
 
@@ -235,6 +274,7 @@
       "cornerstonebc.maps.arcgis.com",
       "services.arcgis.com",
       "gisservices.information.qld.gov.au",
+      "spatial-gis.information.qld.gov.au",
       "gis.brisbane.qld.gov.au",
       "maps.moretonbay.qld.gov.au",
       // Added for FloodWise / Open Data
@@ -257,6 +297,116 @@
     const waitViewIdle=async(extra=240)=>{try{await reactiveUtils.whenOnce(()=>!view.updating);}catch{} await raf(); await sleep(extra);};
     const slug=s=>String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const htmlEsc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    // POD detection runs entirely in-browser; backend upload flag remains for future use
+    const PDF_WORKER_SRC="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    if(window.pdfjsLib){
+      try{
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDF_WORKER_SRC;
+      }catch(e){ console.warn("pdfjs worker init failed",e); }
+    }else{
+      console.warn("pdf.js library failed to load; POD detection disabled.");
+    }
+
+    async function extractPdfText(file){
+      if(!file) throw new Error("No file selected");
+      if(!window.pdfjsLib) throw new Error("PDF parser not available");
+      const buffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({data:buffer}).promise;
+      let text="";
+      for(let i=1;i<=pdf.numPages;i++){
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map(item=>item.str||"").filter(Boolean);
+        text += strings.join(" ") + "\n";
+      }
+      return text;
+    }
+
+    function parseSubdivisionsFromText(text){
+      if(!text) return [];
+      const lines = text.split(/\r?\n/).map(t=>t.trim()).filter(Boolean);
+      const subdivisions=[];
+      const planRegex=/\b((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)\b/i;
+      const planLooseRegex=/((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)/i;
+      const lotRegex=/\b(?:lot|lot\s*no\.?)\s*[:#-]?\s*([0-9A-Za-z-]+)\b/i;
+      const comboRegex=/(\d+[A-Za-z-]?)(?:\s*(?:\/|on)\s*|\s*)((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)/i;
+      const areaRegex=/(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(?:m2|sqm|square metres?|mA\ufffd)/i;
+      let current=null;
+      const pushCurrent=()=>{
+        if(!current) return;
+        if(!current.lot && !current.plan) return;
+        if(typeof current.areaSqm!=="number"||!Number.isFinite(current.areaSqm)){
+          current.areaSqm=null;
+        }
+        const key=`${current.lot||""}_${current.plan||""}`;
+        if(!subdivisions.some(sub=>`${sub.lot}_${sub.plan}`===key)){
+          subdivisions.push({
+            lot:current.lot||null,
+            plan:current.plan||null,
+            areaSqm:current.areaSqm,
+            raw:current.raw
+          });
+        }
+      };
+
+      for(const line of lines){
+        const normalized=line.replace(/\s+/g," ");
+        const lotMatch=normalized.match(lotRegex);
+        let planMatch=normalized.match(planRegex);
+        if(!planMatch) planMatch=normalized.match(planLooseRegex);
+        const comboMatch=normalized.match(comboRegex);
+        const areaMatch=normalized.match(areaRegex);
+
+        let candidateLot=null;
+        let candidatePlan=null;
+        if(comboMatch){
+          candidateLot=comboMatch[1].toUpperCase();
+          candidatePlan=comboMatch[2].replace(/[\s-]+/g,"").toUpperCase();
+        }
+        if(lotMatch){
+          candidateLot=lotMatch[1].toUpperCase();
+        }
+        if(planMatch){
+          candidatePlan=planMatch[1].replace(/[\s-]+/g,"").toUpperCase();
+          if(!candidateLot && typeof planMatch.index==="number"){
+            const prefix=normalized.slice(0, planMatch.index).trim();
+            const inline=prefix.match(/(\d+[A-Za-z-]*)$/);
+            if(inline){
+              candidateLot=inline[1].toUpperCase();
+            }
+          }
+        }
+
+        const shouldStartNew=!current||
+          (candidateLot&&current.lot&&candidateLot!==current.lot)||
+          (candidatePlan&&current.plan&&candidatePlan!==current.plan);
+
+        if(shouldStartNew){
+          pushCurrent();
+          current={lot:null,plan:null,areaSqm:null,raw:normalized};
+        }else if(current){
+          current.raw=normalized;
+        }else{
+          current={lot:null,plan:null,areaSqm:null,raw:normalized};
+        }
+
+        if(candidateLot){
+          current.lot=candidateLot;
+        }
+        if(candidatePlan){
+          current.plan=candidatePlan;
+        }
+        if(areaMatch){
+          const parsed=Number(areaMatch[1].replace(/,/g,""));
+          if(!Number.isNaN(parsed)){
+            current.areaSqm=parsed;
+          }
+        }
+      }
+      pushCurrent();
+      return subdivisions;
+    }
+
 
     function framedExtent(geom){
       try{
@@ -284,6 +434,53 @@
       }catch{}
       return null;
     };
+
+    const projectToViewSR = (geom)=>{
+      try{
+        if(!geom || !view?.spatialReference) return geom;
+        if(!geom.spatialReference){
+          geom.spatialReference = { wkid: 102100 };
+        }
+        const gSR = geom.spatialReference?.wkid || geom.spatialReference?.latestWkid;
+        const vSR = view.spatialReference?.wkid || view.spatialReference?.latestWkid;
+        if(gSR && vSR && gSR === vSR) return geom;
+        const proj = geometryEngine.project(geom, view.spatialReference);
+        return proj || geom;
+      }catch{ return geom; }
+    };
+
+    const isValidLonLat = (pt)=>{
+      if(!pt || typeof pt.x!=="number" || typeof pt.y!=="number") return false;
+      const lon=pt.x, lat=pt.y;
+      return isFinite(lon) && isFinite(lat) && Math.abs(lon)<=180 && Math.abs(lat)<=90;
+    };
+
+    const isInQueensland = (pt)=>{
+      if(!isValidLonLat(pt)) return false;
+      return pt.x>=110 && pt.x<=160 && pt.y>=-45 && pt.y<=0;
+    };
+
+    function normalizeToWebMercator(geom){
+      try{
+        if(!geom) return geom;
+        const sr = geom.spatialReference?.wkid || geom.spatialReference?.latestWkid;
+        if(sr===102100 || sr===3857) return geom;
+        // Peek at first coordinate to guess units
+        const sample = geom.type==="point" ? geom :
+          geom.type==="polyline" ? (geom.paths?.[0]?.[0]) :
+          geom.type==="polygon" ? (geom.rings?.[0]?.[0]) : null;
+        if(sample){
+          const x = sample.x ?? sample[0], y = sample.y ?? sample[1];
+          if(Math.abs(x)>180 || Math.abs(y)>90){
+            geom.spatialReference = { wkid:102100 };
+            return geom;
+          }
+        }
+        // assume geographic, project to web mercator
+        const projected = geometryEngine.project(geom, {wkid:102100});
+        return projected || geom;
+      }catch{ return geom; }
+    }
 
     /* ---------------- Map & rules ---------------- */
     const portal=new Portal({url:"https://cornerstonebc.maps.arcgis.com"});
@@ -337,7 +534,7 @@
     /* --- Search widget (address + Lot/Plan) --- */
     const search=new Search({
       view,
-      includeDefaultSources:true,
+      includeDefaultSources:false,
       popupEnabled:true,
       allPlaceholder:"Search address or Lot/Plan (e.g., 12/SP12345)"
     });
@@ -560,11 +757,28 @@
     }
 
     function flattenFeatureNodes(){ const out=[]; walkAny(view.map,(n)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function")) out.push(n); }); return out; }
-    const looksLikeParcelLayer=node=>/(cadast|parcel|dcdb|lot|property)/i.test((node.title||"").toLowerCase());
+    const PARCEL_FIELD_RX=/\b(LOT(?:_?PLAN)?|LOTNO|LOT_NO|LOTNUMBER|LOT_NUM|LOTNUM|PLAN|PLAN_NO|PLANNO|LOT_PLAN|LOTPLAN|LOT_PLAN_TXT|LOTPLAN_TXT|PARCEL|PARCEL_ID|PROP(?:ERTY)?_?ID?)\b/i;
+    function hasParcelFields(node){
+      try{
+        const flds=node.fields||[];
+        return flds.some(f=>PARCEL_FIELD_RX.test(String(f.name||"")));
+      }catch{return false;}
+    }
+    const looksLikeParcelLayer=node=>{
+      const hay=((node.title||"")+" "+nodePath(node)+" "+(node.url||"")).toLowerCase();
+      return /(cadast|parcel|dcdb|lot|property)/i.test(hay);
+    };
 
     async function findParcelAtPoint(point){
-      const all=flattenFeatureNodes().filter(n=>n.geometryType==="polygon");
-      const pref=[],rest=[]; for(const n of all){ try{ await n.load(); }catch{} (looksLikeParcelLayer(n)?pref:rest).push(n); }
+      const all=flattenFeatureNodes();
+      const pref=[],rest=[];
+      for(const n of all){
+        try{
+          await n.load();
+          if(n.geometryType!=="polygon") continue;
+          (looksLikeParcelLayer(n)||hasParcelFields(n)?pref:rest).push(n);
+        }catch{}
+      }
       const layers=[...pref,...rest];
       const collect=async(opts)=>{ const out=[]; for(const L of layers){ try{ const r=await L.queryFeatures({...opts,returnGeometry:true,outFields:["*"],maxRecordCountFactor:2}); (r.features||[]).forEach(f=>out.push({layer:L,feature:f})); }catch{} } return out; };
       let cand=await collect({geometry:point,spatialRelationship:"intersects"});
@@ -618,6 +832,7 @@
       lastParcelInfo={feature:feat,...info};
       updateSummaryPanel();
     }
+
 
     const bufferedAOIFor=(node,geom)=>{ try{ const gt=(node.geometryType||"").toLowerCase(); if(gt==="point"||gt==="multipoint"||gt==="polyline") return geometryEngine.buffer(geom,TOUCH_BUFFER_M,"meters"); }catch{} return geom; };
     async function countFeatures(node,geom){
@@ -692,22 +907,51 @@
         : "<li><i>No overlays intersect this parcel.</i></li>";
     }
 
+    async function focusOnParcelFeature(feat,{shouldZoom=false}={}){
+      if(!feat || !feat.geometry) return;
+      const geom = normalizeToWebMercator(projectToViewSR(feat.geometry));
+      feat.geometry = geom;
+      updateBadgesFromFeature(feat);
+      // Draw selection differently for points vs polygons
+      selLayer.removeAll();
+      if(geom.type==="point" || geom.type==="multipoint"){
+        selLayer.add(new Graphic({geometry:geom,symbol:{type:"simple-marker",style:"circle",size:10,color:[167,11,19,0.2],outline:{color:"#a70b13",width:2}}}));
+      }else{
+        outlineSelection(geom);
+      }
+      await hideUnusedOverlaysFor(geom);
+      try{
+        const addr=await resolveBestAddress(geom, feat);
+        lastParcelInfo.addressText=addr||lastParcelInfo.addressText||"Address unavailable";
+        updateSummaryPanel();
+      }catch{}
+      updateSideOverlaySummary(geom);
+      if(shouldZoom){
+        try{
+          if(geom.type==="point" || geom.type==="multipoint"){
+            await view.goTo({target:geom, zoom:18});
+          }else{
+            const ext = geom.extent || framedExtent(geom);
+            if(ext){
+              await view.goTo({target:ext.expand(1.2), animate:true});
+            }else if(geom.centroid){
+              await view.goTo({target:geom.centroid, zoom:18});
+            }else{
+              await view.goTo({target:geom, zoom:18});
+            }
+          }
+        }catch(err){
+          console.warn("goTo failed", err);
+        }
+      }
+    }
+
     view.on("click", async ev=>{
       try{
         showLoading(true);
         const parcel=await findParcelAtPoint(ev.mapPoint);
         if(!parcel){ selLayer.removeAll(); return; }
-        updateBadgesFromFeature(parcel);
-        outlineSelection(parcel.geometry);
-        await hideUnusedOverlaysFor(parcel.geometry);
-
-        try{
-          const addr=await resolveBestAddress(parcel.geometry, parcel);
-          lastParcelInfo.addressText=addr||lastParcelInfo.addressText;
-          updateSummaryPanel();
-        }catch{}
-
-        updateSideOverlaySummary(parcel.geometry);
+        await focusOnParcelFeature(parcel);
       } finally { showLoading(false); }
     });
 
@@ -880,6 +1124,14 @@
     // Property holding datasets
     const ODS = "https://data.brisbane.qld.gov.au/api/explore/v2.1/catalog/datasets/property-boundaries-holding/records";
     const HOLDING_FS = "https://services2.arcgis.com/dEKgZETqwmDAh1rP/arcgis/rest/services/property_boundaries_holding/FeatureServer/0/query";
+    const LOTPLAN_FALLBACK_URLS = [
+      // Addresses (points) first to avoid projection issues
+      "https://spatial-gis.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer/0",
+      // Cadastral polygons second
+      "https://spatial-gis.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer/4",
+      // BCC fallback
+      "https://services2.arcgis.com/dEKgZETqwmDAh1rP/arcgis/rest/services/property_boundaries_parcel/FeatureServer/0"
+    ];
     const warmFloodwiseImages=new Set();
     function warmFloodwiseReport(url){
       if(!url) return;
@@ -1359,6 +1611,102 @@ setRpt("Composing document…", 93);
         });
     });
 
+    /* ---------------- POD Upload ---------------- */
+    (function initPodUpload(){
+      const form = $("podForm");
+      const input = $("podFile");
+      const statusEl = $("podStatus");
+      const list = $("podResultList");
+      const wrap = $("podResultWrap");
+      const submitBtn = $("podSubmitBtn");
+      if(!form || !input || !statusEl) return;
+
+      const setStatus = (msg, isError=false)=>{
+        statusEl.textContent = msg;
+        statusEl.classList.toggle("error", !!isError);
+      };
+      const setBusy = busy=>{
+        if(submitBtn){
+          submitBtn.disabled = busy;
+          submitBtn.textContent = busy ? "Uploading..." : "Upload & Import";
+        }
+        if(input){
+          input.disabled = busy;
+        }
+      };
+      const renderResults = (items=[])=>{
+        if(!wrap || !list) return;
+        if(!items.length){
+          wrap.hidden = true;
+          list.innerHTML = "";
+          return;
+        }
+        wrap.hidden = false;
+        list.innerHTML = items.map(sub=>{
+          const lot = htmlEsc(sub.lot || "?");
+          const plan = htmlEsc(sub.plan || "Unknown plan");
+          const area = sub.areaSqm ? `${sub.areaSqm.toLocaleString()} sqm` : "Area N/A";
+          return `<li>Lot ${lot} on ${plan} (${area})</li>`;
+        }).join("");
+      };
+
+      input.addEventListener("change",()=>{
+        if(input.files && input.files.length){
+          const nameEl = $("podFileName");
+          if(nameEl) nameEl.textContent = input.files[0].name;
+          setStatus(`Ready to import ${input.files[0].name}`);
+        }else{
+          const nameEl = $("podFileName");
+          if(nameEl) nameEl.textContent = "No file chosen";
+          setStatus("Select a POD PDF to begin.");
+          renderResults([]);
+        }
+      });
+
+      form.addEventListener("submit", async evt=>{
+        evt.preventDefault();
+        if(!input.files || !input.files.length){
+          setStatus("Choose a POD PDF first.", true);
+          return;
+        }
+        const file = input.files[0];
+
+        setBusy(true);
+        setStatus("Parsing PDF locally...");
+        renderResults([]);
+
+        try{
+          const text = await extractPdfText(file);
+          if(!text || !text.trim()){
+            throw new Error("PDF did not contain readable text.");
+          }
+          const subdivisions = parseSubdivisionsFromText(text);
+          renderResults(subdivisions);
+
+          const count = subdivisions.length;
+          let msg = count ? `Parsed ${count} subdivision${count===1? "":"s"} locally.` : "No subdivisions detected.";
+          let statusError = false;
+          const focusTarget = subdivisions.find(sub=>sub.lot && sub.plan);
+          if(focusTarget){
+            const zoomed = await focusOnLotPlan(focusTarget.lot, focusTarget.plan);
+            if(zoomed){
+              msg += ` Zoomed to Lot ${focusTarget.lot} on ${focusTarget.plan}.`;
+            }else{
+              msg += ` Could not locate Lot ${focusTarget.lot} on ${focusTarget.plan} on the map.`;
+              statusError = true;
+            }
+          }
+          msg += " Upload to ArcGIS coming soon.";
+          setStatus(msg, statusError);
+        }catch(err){
+          console.error(err);
+          setStatus(err.message || "Local parsing failed", true);
+        }finally{
+          setBusy(false);
+        }
+      });
+    })();
+
     /* ============================================================
        === Lot/Plan Search source (QLD) ============================
        ============================================================ */
@@ -1382,14 +1730,18 @@ setRpt("Composing document…", 93);
     let _parcelLayerCache=null;
     async function getParcelLayers(){
       if(_parcelLayerCache) return _parcelLayerCache;
-      const nodes=flattenFeatureNodes().filter(n=>{
+      const candidates=flattenFeatureNodes();
+      const polys=[];
+      for(const n of candidates){
         try{
-          return n.geometryType==="polygon" && looksLikeParcelLayer(n);
-        }catch{return false;}
-      });
-      for(const n of nodes){ try{ await n.load(); }catch{} }
-      _parcelLayerCache=nodes;
-      return nodes;
+          await n.load();
+          if(n.geometryType==="polygon" && (looksLikeParcelLayer(n) || hasParcelFields(n))){
+            polys.push(n);
+          }
+        }catch{}
+      }
+      _parcelLayerCache=polys;
+      return polys;
     }
 
     function escSQL(s){ return String(s).replace(/'/g,"''"); }
@@ -1420,11 +1772,18 @@ setRpt("Composing document…", 93);
 
       const planClauses=[];
       const planU = escSQL(plan.toUpperCase());
+      const planCompact = escSQL(plan.toUpperCase().replace(/[^A-Z0-9]/g,""));
+      const lotPlanFull = escSQL((String(lot)+"/"+plan).toUpperCase());
+      const lotPlanCompact = escSQL((String(lot)+plan).toUpperCase().replace(/[^A-Z0-9]/g,""));
       for(const f of planFields){
         if(isTextField(f)){
-          planClauses.push(`UPPER(${f.name}) LIKE '%${planU}%'`);
+          const fieldExpr = `UPPER(${f.name})`;
+          const scrubExpr = `REPLACE(REPLACE(REPLACE(${fieldExpr},' ',''),'-',''),'/','')`;
+          planClauses.push(`${fieldExpr} LIKE '%${planU}%'`);
+          planClauses.push(`${scrubExpr} LIKE '%${planCompact}%'`);
           if(/LOT[_ ]?PLAN|LOTPLAN|LOT_PLAN/i.test(f.name)){
-            planClauses.push(`UPPER(${f.name}) LIKE '%${escSQL((String(lot)+"/"+plan).toUpperCase())}%'`);
+            planClauses.push(`${fieldExpr} LIKE '%${lotPlanFull}%'`);
+            planClauses.push(`${scrubExpr} LIKE '%${lotPlanCompact}%'`);
           }
         }
       }
@@ -1434,6 +1793,69 @@ setRpt("Composing document…", 93);
       if(planClauses.length) parts.push("("+planClauses.join(" OR ")+")");
       if(!parts.length) return null;
       return parts.join(" AND ");
+    }
+
+    function buildFallbackLotPlanWhere(lot, plan){
+      if(!lot || !plan) return null;
+      const lotU = escSQL(String(lot).toUpperCase());
+      const planU = escSQL(plan.toUpperCase());
+      const planCompact = escSQL(plan.toUpperCase().replace(/[^A-Z0-9]/g,""));
+      const lotPlanFull = escSQL((String(lot)+"/"+plan).toUpperCase());
+      const lotPlanCompact = escSQL((String(lot)+plan).toUpperCase().replace(/[^A-Z0-9]/g,""));
+      return [
+        "(",
+        `  UPPER(lot)='${lotU}'`,
+        `  OR UPPER(lotplan) LIKE '%${lotPlanFull}%'`,
+        `  OR REPLACE(REPLACE(REPLACE(UPPER(lotplan),' ',''),'-',''),'/','') LIKE '%${lotPlanCompact}%'`,
+        ") AND (",
+        `  UPPER(plan) LIKE '%${planU}%'`,
+        `  OR REPLACE(REPLACE(REPLACE(UPPER(plan),' ',''),'-',''),'/','') LIKE '%${planCompact}%'`,
+        `  OR REPLACE(REPLACE(REPLACE(UPPER(lotplan),' ',''),'-',''),'/','') LIKE '%${lotPlanCompact}%'`,
+        ")"
+      ].join("\n");
+    }
+
+    async function queryLotPlanFallback(lot, plan){
+      if(!LOTPLAN_FALLBACK_URLS.length) return [];
+      const results=[];
+      const compact = `${lot}${plan}`.toUpperCase().replace(/[^A-Z0-9]/g,"");
+      for(const url of LOTPLAN_FALLBACK_URLS){
+        const isLotplanOnly = /LandParcelPropertyFramework/gi.test(url);
+        const where = isLotplanOnly
+          ? `UPPER(lotplan)='${compact}'`
+          : (buildFallbackLotPlanWhere(lot, plan) || `UPPER(lotplan)='${compact}'`);
+        try{
+          console.log("[Fallback] querying", url, "where:", where);
+          const params = new URLSearchParams({
+            f:"json",
+            where,
+            outFields:"*",
+            returnGeometry:"true",
+            outSR:String(view?.spatialReference?.wkid||3857),
+            maxRecordCountFactor:"5"
+          });
+          const res = await fetch(`${url}/query`,{
+            method:"POST",
+            headers:{"Content-Type":"application/x-www-form-urlencoded"},
+            body:params
+          });
+          if(!res.ok) throw new Error("Fallback lot plan query failed: "+res.status);
+          const json = await res.json();
+          console.log("[Fallback] results", (json.features||[]).length);
+          (json.features||[]).forEach(f=>{
+            const g = Graphic.fromJSON ? Graphic.fromJSON(f) : new Graphic({geometry:f.geometry,attributes:f.attributes});
+            if(!g.geometry && f.geometry) g.geometry = f.geometry;
+            if(g.geometry && !g.geometry.spatialReference){
+              g.geometry.spatialReference = view?.spatialReference || { wkid: 102100 };
+            }
+            results.push({layer:{title:"Lot/Plan (Fallback)"}, feature:g});
+          });
+          if(results.length) break;
+        }catch(e){
+          console.warn("Lot/Plan fallback error:", e);
+        }
+      }
+      return results;
     }
 
     async function queryLotPlanAcrossLayers(lot, plan){
@@ -1454,7 +1876,40 @@ setRpt("Composing document…", 93);
           }
         }catch(e){ /* ignore per-layer errors */ }
       }
+      if(!out.length){
+        const fallback = await queryLotPlanFallback(lot, plan);
+        if(fallback?.length) out.push(...fallback);
+      }
       return out;
+    }
+
+    async function focusOnLotPlan(lot, plan){
+      if(!lot || !plan) return false;
+      try{
+        await view.when();
+        showLoading(true);
+        console.log("[LotPlan] searching", lot, plan);
+        // Try fallback services first (statewide), then map layers
+        const fb = await queryLotPlanFallback(lot, plan);
+        if(fb && fb.length){
+          console.log("[LotPlan] fallback hit", fb[0]?.feature?.attributes);
+          await focusOnParcelFeature(fb[0].feature,{shouldZoom:true});
+          return true;
+        }
+        const matches = await queryLotPlanAcrossLayers(lot, plan);
+        if(matches && matches.length){
+          console.log("[LotPlan] layer hit", matches[0]?.layer?.title || matches[0]?.feature);
+          await focusOnParcelFeature(matches[0].feature,{shouldZoom:true});
+          return true;
+        }
+        console.warn("[LotPlan] no hits for", lot, plan);
+        return false;
+      }catch(err){
+        console.warn("focusOnLotPlan error:", err);
+        return false;
+      }finally{
+        showLoading(false);
+      }
     }
 
     const lotPlanSource = {
@@ -1484,21 +1939,19 @@ setRpt("Composing document…", 93);
       zoomScale: 1000
     };
 
-    search.sources.add(lotPlanSource);
+    (async ()=>{
+      await search.when();
+      const existing = search.sources.toArray();
+      search.sources.removeAll();
+      search.sources.add(lotPlanSource);
+      existing.forEach(src=>search.sources.add(src));
+    })();
 
     search.on("select-result", async (e)=>{
       try{
         const feat = e.result && e.result.feature;
-        if(feat && feat.geometry && feat.geometry.type==="polygon"){
-          updateBadgesFromFeature(feat);
-          outlineSelection(feat.geometry);
-          await hideUnusedOverlaysFor(feat.geometry);
-          try{
-            const addr=await resolveBestAddress(feat.geometry, feat);
-            lastParcelInfo.addressText=addr||lastParcelInfo.addressText;
-            updateSummaryPanel();
-          }catch{}
-          updateSideOverlaySummary(feat.geometry);
+        if(feat && feat.geometry){
+          await focusOnParcelFeature(feat);
         }
       }catch(err){ console.warn("select-result handler:", err); }
     });

@@ -56,15 +56,15 @@
   #contextBar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:8px 16px;background:#fff;border-bottom:1px solid var(--border)}
   .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:4px 10px;font-size:12px}
 
-  main{flex:1;min-height:520px;display:grid;grid-template-columns:clamp(280px,24vw,420px) 1fr;gap:12px;padding:12px}
-  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:auto;scrollbar-width:thin;scrollbar-color:#c7cbd1 transparent}
+  main{flex:1;min-height:0;display:grid;grid-template-columns:clamp(280px,24vw,420px) 1fr;gap:12px;padding:12px}
+  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:auto;max-height:calc(100vh - 140px);height:calc(100vh - 140px);scrollbar-width:thin;scrollbar-color:#c7cbd1 transparent}
   #left::-webkit-scrollbar{ width: 8px; }
   #left::-webkit-scrollbar-thumb{ background:#c7cbd1; border-radius:6px; }
   #left::-webkit-scrollbar-track{ background:transparent; }
   #viewWrap{position:relative;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   #viewDiv{position:absolute;inset:0}
 
-  .panel{display:none;padding:12px}
+  .panel{display:none;padding:12px;overflow:auto;max-height:calc(100vh - 200px)}
   .panel.active{display:block}
 .pod-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
   .pod-form input[type="file"]{display:none}
@@ -82,6 +82,22 @@
   .pod-details summary::after{content:"▾";float:right;font-size:12px;color:#666}
   .pod-details[open] summary::after{content:"▴"}
   .pod-details{max-height:280px;overflow:auto}
+  /* POD dark theme alignment */
+  #podUploadCard{background:var(--map-panel,#1b1c20);border:1px solid var(--map-border,#2b2c33);color:var(--map-ink,#f5f5f8);}
+  .pod-drop{border:1px dashed #c5cad3;border-radius:12px;padding:10px;transition:background .2s,border-color .2s}
+  .pod-drop.dragover{background:#f2f5fb;border-color:#7f9ad5}
+  #podUploadCard .section-title,#podUploadCard summary{color:var(--map-ink,#f5f5f8);}
+  #podUploadCard p,#podUploadCard .pod-status,#podUploadCard .pod-file-name{color:var(--map-muted,#9ea1ab);}
+  #podUploadCard .pod-results{border-color:var(--map-border,#2b2c33);}
+  #podUploadCard .pod-upload-btn{background:var(--map-panel-2,#262628);border-color:var(--map-border,#2b2c33);color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .pod-upload-btn:hover{background:var(--map-panel,#1b1c20);border-color:var(--map-accent,#c03b41);}
+  #podUploadCard .pod-drop{border:1px dashed var(--map-border,#2b2c33);background:var(--map-panel-2,#262628);}
+  #podUploadCard .pod-drop.dragover{background:var(--map-panel,#1b1c20);border-color:var(--map-accent,#c03b41);}
+  #podUploadCard .pod-zoom-btn{background:var(--map-panel-2,#262628);border:1px solid var(--map-border,#2b2c33);color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .pod-zoom-btn:hover{background:var(--map-panel,#1b1c20);border-color:var(--map-accent,#c03b41);}
+  #podUploadCard .pod-result-row{color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .btn.full{background:var(--map-accent,#c03b41);border:none;color:#fff;}
+  #podUploadCard .btn.full:hover{background:var(--map-accent-dark,#9e2c32);}
 
   #statusBar{display:flex;gap:24px;align-items:center;padding:6px 16px;background:#fff;border-top:1px solid var(--border);color:#555;font-size:12px}
 
@@ -184,7 +200,7 @@
             <summary>POD Import </summary>
             <p style="margin-top:10px;font-size:13px;color:#4b5563">Upload a POD PDF to auto-detect subdivisions. ArcGIS uploads will be enabled next.</p>
             <form id="podForm" class="pod-form">
-              <div class="pod-upload-row">
+              <div class="pod-upload-row pod-drop" id="podDropZone">
                 <label for="podFile" class="pod-upload-btn">Choose file</label>
                 <div id="podFileName" class="pod-file-name">No file chosen</div>
               </div>
@@ -534,7 +550,7 @@
     /* --- Search widget (address + Lot/Plan) --- */
     const search=new Search({
       view,
-      includeDefaultSources:false,
+      includeDefaultSources:true,
       popupEnabled:true,
       allPlaceholder:"Search address or Lot/Plan (e.g., 12/SP12345)"
     });
@@ -1703,6 +1719,32 @@ setRpt("Composing document…", 93);
           setStatus(err.message || "Local parsing failed", true);
         }finally{
           setBusy(false);
+        }
+      });
+      const dropZone = $("podDropZone");
+      const setFile = file=>{
+        if(!file) return;
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        const nameEl = $("podFileName");
+        if(nameEl) nameEl.textContent = file.name;
+        setStatus(`Ready to import ${file.name}`);
+      };
+      const prevent = e=>{ e.preventDefault(); e.stopPropagation(); };
+      ["dragenter","dragover","dragleave","drop"].forEach(ev=>{
+        dropZone?.addEventListener(ev, prevent);
+      });
+      dropZone?.addEventListener("dragenter", ()=> dropZone.classList.add("dragover"));
+      dropZone?.addEventListener("dragleave", ()=> dropZone.classList.remove("dragover"));
+      dropZone?.addEventListener("dragend", ()=> dropZone.classList.remove("dragover"));
+      dropZone?.addEventListener("drop", ev=>{
+        dropZone.classList.remove("dragover");
+        const file = ev.dataTransfer?.files?.[0];
+        if(file && file.type==="application/pdf"){
+          setFile(file);
+        }else{
+          setStatus("Drop a PDF file.", true);
         }
       });
     })();

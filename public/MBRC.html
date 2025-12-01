@@ -213,6 +213,11 @@
           <div class="rptStep" id="rptS4">Compose document</div>
         </div>
         <div style="margin-top:10px;color:#667085;font-size:12px">Keep this tab visible while the report builds so map screenshots can render smoothly.</div>
+        <div id="rptActions" style="margin-top:12px;display:none;gap:8px;align-items:center;">
+          <button id="openReportBtn" class="btn" type="button">Open Report</button>
+          <button id="downloadReportBtn" class="btn" type="button">Download HTML</button>
+          <span id="rptReadyMsg" style="color:#344054;font-size:12px;">Report ready. Choose an option below.</span>
+        </div>
       </div>
     </div>
   </div>
@@ -1263,21 +1268,30 @@
       }
     }
 
+    let lastReportHTML=null, lastReportTitle="Property Report";
     document.getElementById("btnPrintReport").addEventListener("click", async ()=>{
-      // Open the report window immediately on user gesture so Safari/Popup blockers allow it
-      const prepWin = window.open("about:blank","_blank");
-      if(prepWin){
-        prepWin.document.write("<!doctype html><title>Preparing report…</title><p style='font-family:system-ui,sans-serif;padding:16px'>Preparing report…</p>");
-        prepWin.document.close();
-      }else{
-        alert("Please allow pop-ups in your browser to generate the report.");
-        return;
-      }
+      const actions=$("rptActions");
+      if(actions) actions.style.display="none";
       document.getElementById("rptOverlay").style.display="grid";
-      try{ await buildAndOpenReport(prepWin); } finally { document.getElementById("rptOverlay").style.display="none"; }
+      try{
+        const result = await buildAndOpenReport();
+        if(result && result.html){
+          lastReportHTML = result.html;
+          lastReportTitle = result.title || "Property Report";
+          setRpt("Report ready. Choose an option below.", 100, "rptS4");
+          const msg=$("rptReadyMsg"); if(msg) msg.textContent="Report ready. Choose an option below.";
+          if(actions) actions.style.display="flex";
+        }else{
+          document.getElementById("rptOverlay").style.display="none";
+        }
+      } catch(e){
+        console.error(e);
+        alert("Could not create report.");
+        document.getElementById("rptOverlay").style.display="none";
+      }
     });
 
-    async function buildAndOpenReport(preopenedWindow){
+    async function buildAndOpenReport(){
       try{
         showLoading(true);
         setRpt("Locating parcel…", 12);
@@ -1439,21 +1453,43 @@
           "</div>");
         }
 
-        html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>© Moreton Bay Regional Council — CornerstonePlus. Indicative only.</div>");
-        html.push("</body>");
+        
+html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>? Moreton Bay Regional Council ? CornerstonePlus. Indicative only.</div>");
+html.push("</body>");
 
-        const w=preopenedWindow || window.open("about:blank","_blank");
-        if(w){
-          w.document.open();
-          w.document.write(html.join(""));
-          w.document.close();
-          try { w.document.title = reportFileTitle; } catch(e){}
-          setTimeout(()=>{try{w.focus(); w.print();}catch{}},350);
-        }
-        setRpt("Done", 100, "rptS4");
+        const htmlOut = html.join("");
+        return {html: htmlOut, title: reportFileTitle};
       }catch(e){ console.error(e); alert("Could not create report."); }
       finally{ showLoading(false); }
     }
+
+    (function wireReportActions(){
+      const openBtn=$("openReportBtn");
+      const dlBtn=$("downloadReportBtn");
+      if(openBtn){
+        openBtn.addEventListener("click", ()=>{
+          if(!lastReportHTML){ alert("Report not ready yet."); return; }
+          const w=window.open("about:blank","_blank");
+          if(!w){ alert("Please allow pop-ups to view the report."); return; }
+          w.document.open();
+          w.document.write(lastReportHTML);
+          w.document.close();
+          try{ w.document.title = lastReportTitle; }catch{}
+          document.getElementById("rptOverlay").style.display="none";
+        });
+      }
+      if(dlBtn){
+        dlBtn.addEventListener("click", ()=>{
+          if(!lastReportHTML){ alert("Report not ready yet."); return; }
+          const blob=new Blob([lastReportHTML],{type:"text/html"});
+          const url=URL.createObjectURL(blob);
+          const a=document.createElement("a");
+          a.href=url; a.download=(lastReportTitle||"property-report")+".html";
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(()=>URL.revokeObjectURL(url), 1500);
+        });
+      }
+    })();
 
     /* ---------------- Tabs & Home ---------------- */
     ;[["summary"],["setbacks"],["proposal"],["yield"]].forEach(([name])=>{

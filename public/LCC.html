@@ -41,6 +41,7 @@
 <link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js" crossorigin>
 <link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js" crossorigin>
 <link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/config.js" crossorigin>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <!-- ===== End performance hints ===== -->
 
 <style>
@@ -59,12 +60,50 @@
   .badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:4px 10px;font-size:12px}
 
   main{flex:1;min-height:520px;display:grid;grid-template-columns:clamp(280px,24vw,420px) 1fr;gap:12px;padding:12px}
-  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+  #left{min-width:280px;background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:auto;max-height:calc(100vh - 140px);height:calc(100vh - 140px);scrollbar-width:thin;scrollbar-color:#c7cbd1 transparent}
+  #left::-webkit-scrollbar{ width: 8px; }
+  #left::-webkit-scrollbar-thumb{ background:#c7cbd1; border-radius:6px; }
+  #left::-webkit-scrollbar-track{ background:transparent; }
   #viewWrap{position:relative;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   #viewDiv{position:absolute;inset:0}
 
-  .panel{display:none;padding:12px}
+  .panel{display:none;padding:12px;overflow:auto;max-height:calc(100vh - 200px)}
   .panel.active{display:block}
+  .pod-form{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+  .pod-form input[type="file"]{display:none}
+  .pod-upload-row{display:flex;align-items:center;gap:10px}
+  .pod-upload-btn{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;border-radius:12px;border:1px solid #d0d4dc;background:#fff;color:var(--ink);font-weight:600;font-size:13px;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.6),0 1px 3px rgba(0,0,0,.08)}
+  .pod-upload-btn:hover{border-color:#b3b9c6;background:#f7f9fc}
+  .pod-drop{border:1px dashed #c5cad3;border-radius:12px;padding:10px;transition:background .2s,border-color .2s}
+  .pod-drop.dragover{background:#f2f5fb;border-color:#7f9ad5}
+  .pod-file-name{font-size:13px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pod-form .btn.full{width:100%;text-align:center}
+  .pod-status{font-size:12px;color:#4b5563;margin-top:6px;min-height:18px}
+  .pod-status.error{color:#b42318}
+  .pod-results{margin-top:10px;border-top:1px solid var(--border);padding-top:8px;max-height:200px;overflow-y:auto;overflow-x:hidden}
+  .pod-results ul{margin:0;padding-left:18px;font-size:13px}
+  .pod-result-row{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .pod-zoom-btn{border:1px solid #d0d4dc;background:#f7f9fc;border-radius:10px;padding:6px 10px;font-size:12px;cursor:pointer}
+  .pod-zoom-btn:hover{background:#eef2f7;border-color:#b3b9c6}
+  .pod-details{max-height:280px;overflow:auto}
+  .pod-details summary{cursor:pointer;font-weight:600;font-size:15px;list-style:none}
+  .pod-details summary::-webkit-details-marker{display:none}
+  .pod-details summary::after{content:"+";float:right;font-size:12px;color:#666}
+  .pod-details[open] summary::after{content:"-"}
+  /* Darken POD panel to align with map-theme */
+  #podUploadCard{background:var(--map-panel,#1b1c20);border:1px solid var(--map-border,#2b2c33);color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .section-title,#podUploadCard summary{color:var(--map-ink,#f5f5f8);}
+  #podUploadCard p,#podUploadCard .pod-status,#podUploadCard .pod-file-name{color:var(--map-muted,#9ea1ab);}
+  #podUploadCard .pod-result-row{color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .pod-results{border-color:var(--map-border,#2b2c33);}
+  #podUploadCard .pod-zoom-btn{background:var(--map-panel-2,#262628);border-color:var(--map-border,#2b2c33);color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .pod-zoom-btn:hover{background:var(--map-panel,#1b1c20);border-color:var(--map-accent,#c03b41);}
+  #podUploadCard .pod-upload-btn{background:var(--map-panel-2,#262628);border-color:var(--map-border,#2b2c33);color:var(--map-ink,#f5f5f8);}
+  #podUploadCard .pod-upload-btn:hover{background:var(--map-panel,#1b1c20);border-color:var(--map-accent,#c03b41);}
+  #podUploadCard .pod-drop{border-color:var(--map-border,#2b2c33);background:var(--map-panel-2,#262628);}
+  #podUploadCard .pod-drop.dragover{background:var(--map-panel,#1b1c20);border-color:var(--map-accent,#c03b41);}
+  #podUploadCard .btn.full{background:var(--map-accent,#c03b41);border:none;color:#fff;}
+  #podUploadCard .btn.full:hover{background:var(--map-accent-dark,#9e2c32);}
 
   #statusBar{display:flex;gap:24px;align-items:center;padding:6px 16px;background:#fff;border-top:1px solid var(--border);color:#555;font-size:12px}
 
@@ -136,11 +175,6 @@
       <div class="side-heading">
         <div class="side-heading-title">LOGAN CITY INTERACTIVE MAPPING</div>
       </div>
-        
-        
-       
-      </div>
-
       <section id="panel-summary" class="panel active" role="tabpanel" aria-labelledby="tab-summary">
         
         <button class="tab" id="tab-summary"  role="tab" aria-selected="true"  aria-controls="panel-summary">Summary</button>
@@ -148,7 +182,7 @@
           <h2 class="section-title">Property</h2>
           <div class="kv">
             <div><b>Lot/Plan:</b> <span id="sumLot">--</span></div>
-            <div><b>Area:</b> <span id="sumArea">-- m²</span></div>
+            <div><b>Area:</b> <span id="sumArea">-- m2</span></div>
             <div><b>Class:</b> <span id="sumClass">--</span></div>
             <div><b>Address:</b> <span id="sumAddress">--</span></div>
             <div><b>Council:</b> <span id="sumCouncil">Logan City Council</span></div>
@@ -156,7 +190,26 @@
         </div>
         <div class="card">
           <h2 class="section-title">Overlays</h2>
-          <ul id="sumOverlays" class="sumlist"><li><i>Select a parcel…</i></li></ul>
+          <ul id="sumOverlays" class="sumlist"><li><i>Select a parcel...</i></li></ul>
+        </div>
+        <div class="card" id="podUploadCard">
+          <details class="pod-details" id="podDetails">
+            <summary>POD Import</summary>
+            <p style="margin-top:10px;font-size:13px;color:#4b5563">Upload a POD PDF to auto-detect subdivisions. ArcGIS uploads will be enabled next.</p>
+            <form id="podForm" class="pod-form">
+              <div class="pod-upload-row pod-drop" id="podDropZone">
+                <label for="podFile" class="pod-upload-btn">Choose file</label>
+                <div id="podFileName" class="pod-file-name">No file chosen</div>
+              </div>
+              <input type="file" id="podFile" accept="application/pdf" required>
+              <button type="submit" id="podSubmitBtn" class="btn full">Upload & Import</button>
+            </form>
+            <div id="podStatus" class="pod-status">Select a POD PDF to begin.</div>
+            <div id="podResultWrap" class="pod-results" hidden>
+              <strong style="font-size:13px;display:block;margin-bottom:4px">Detected Subdivisions</strong>
+              <ul id="podResultList"></ul>
+            </div>
+          </details>
         </div>
       </section>
 
@@ -175,7 +228,7 @@
 
     <div id="viewWrap">
       <div id="viewDiv"></div>
-      <div id="loadingMask"><div class="spinner" aria-label="Loading…"></div></div>
+      <div id="loadingMask"><div class="spinner" aria-label="Loading..."></div></div>
     </div>
   </main>
 
@@ -192,17 +245,18 @@
         <h1>LOGAN CITY INTERACTIVE MAPPING - GENERATING REPORT</h1>
       </div>
       <div id="rptBody">
-        <div id="rptStatus"><div id="rptRing"></div><div id="rptMsg">Starting…</div></div>
-        <div id="rptProgress"><div id="rptBar"></div></div>
-        <div id="rptSteps">
-          <div class="rptStep" id="rptS1">Locate parcel</div>
-          <div class="rptStep" id="rptS2">Resolve address</div>
-          <div class="rptStep" id="rptS3">Render overlays</div>
-          <div class="rptStep" id="rptS4">Compose document</div>
-        </div>
-        <div style="margin-top:10px;color:#667085;font-size:12px">Keep this tab visible while the report builds so map screenshots can render smoothly.</div>
-      </div>
-    </div>
+  <div id="rptStatus"><div id="rptRing"></div><div id="rptMsg">Starting...</div></div>
+  <div id="rptProgress"><div id="rptBar"></div></div>
+  <div id="rptSteps">
+    <div class="rptStep" id="rptS1">Locate parcel</div>
+    <div class="rptStep" id="rptS2">Resolve address</div>
+    <div class="rptStep" id="rptS3">Render overlays</div>
+    <div class="rptStep" id="rptS4">Compose document</div>
+  </div>
+  <div style="margin-top:10px;color:#667085;font-size:12px">Keep this tab visible while the report builds so map screenshots can render smoothly.</div>
+</div>
+  </div>
+</div>
   </div>
 
   <script type="module">
@@ -232,18 +286,27 @@
     const GEOCODER_URL = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer";
     const LOGAN=[153.1024711187046,-27.76239839483306]; // Provided center
     const START_SCALE = 36111.909643; // Provided scale
-    const M2="m²";
+    const M2="m2";
     const HOUSES_OUT = 3;
     const HOUSE_LOT_METERS = 25;
     const SCREEN_BUFFER_METERS = HOUSES_OUT * HOUSE_LOT_METERS;
     const SHOT_SIZE = { width: 1280, height: 900 };
+    const LOTPLAN_FALLBACK_URLS = [
+      "https://spatial-gis.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer/0",
+      "https://spatial-gis.information.qld.gov.au/arcgis/rest/services/PlanningCadastre/LandParcelPropertyFramework/MapServer/4",
+      "https://services2.arcgis.com/dEKgZETqwmDAh1rP/arcgis/rest/services/property_boundaries_parcel/FeatureServer/0",
+      "https://services2.arcgis.com/dEKgZETqwmDAh1rP/arcgis/rest/services/property_boundaries_holding/FeatureServer/0",
+      "https://spatial-gis.information.qld.gov.au/arcgis/rest/services/Property/PropertyBoundaries/MapServer/0"
+    ];
 
     /* ---- CORS allow-list for address queries ---- */
     (function(){
       var hosts = [
         "cornerstonebc.maps.arcgis.com",
         "services.arcgis.com",
+        "services2.arcgis.com",
         "gisservices.information.qld.gov.au",
+        "spatial-gis.information.qld.gov.au",
         "gis.brisbane.qld.gov.au",
         "maps.moretonbay.qld.gov.au",
         "maps.logan.qld.gov.au"
@@ -266,9 +329,134 @@
     const waitViewIdle=async function(extra){ extra = (typeof extra==="number")?extra:240; try{ await reactiveUtils.whenOnce(function(){ return !view.updating; }); }catch(e){} await raf(); await sleep(extra); };
     const slug=function(s){ s=String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); return s; };
     const htmlEsc=function(s){ s=String((s===undefined||s===null)?"":s); return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); };
+    const attrEsc=function(s){ s=String((s===undefined||s===null)?"":s); return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;"); };
     const valOr=function(v,def){ return (v===undefined||v===null)?def:v; };
+    const PDF_WORKER_SRC="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    if(window.pdfjsLib){
+      try{
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc=PDF_WORKER_SRC;
+      }catch(e){ console.warn("pdfjs worker init failed",e); }
+    }else{
+      console.warn("pdf.js library failed to load; POD detection disabled.");
+    }
+    async function extractPdfText(file){
+      if(!file) throw new Error("No file selected");
+      if(!window.pdfjsLib) throw new Error("PDF parser not available");
+      const buffer = await file.arrayBuffer();
+      const pdf = await window.pdfjsLib.getDocument({data:buffer}).promise;
+      let text="";
+      for(var i=1;i<=pdf.numPages;i++){
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map(function(item){ return item.str||""; }).filter(Boolean);
+        text += strings.join(" ") + "\\n";
+      }
+      return text;
+    }
+        function parseSubdivisionsFromText(text){
+      if(!text) return [];
+      const lines = text.split(/\r?\n/).map(function(t){ return t.trim(); }).filter(Boolean);
+      const subdivisions=[];
+      const planRegex=/\b((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)\b/i;
+      const planLooseRegex=/((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)/i;
+      const lotRegex=/\b(?:lot|lot\s*no\.?)\s*[:#-]?\s*([0-9A-Za-z-]+)\b/i;
+      const comboRegex=/(\d+[A-Za-z-]?)(?:\s*(?:\/|on)\s*|\s*)((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)/i;
+      const areaRegex=/(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(?:m2|sqm|square metres?)/i;
 
-    function framedExtent(geom){
+      const globalLotPlan=[...text.matchAll(/\bLot\s+(\d+[A-Za-z-]?)\s+on\s+((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)\b/ig)];
+      globalLotPlan.forEach(function(m){
+        const lot = m[1];
+        const plan = m[2].replace(/[\s-]+/g,"").toUpperCase();
+        const key=lot+"_"+plan;
+        if(!subdivisions.some(function(sub){ return (sub.lot+"_"+sub.plan)===key; })){
+          subdivisions.push({lot:lot,plan:plan,areaSqm:null,raw:m[0]});
+        }
+      });
+      const globalCombos=[...text.matchAll(/\b(\d+[A-Za-z-]?)\s*(?:\/|on)?\s*((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)\b/ig)];
+      globalCombos.forEach(function(m){
+        const lot=m[1];
+        const plan=m[2].replace(/[\s-]+/g,"").toUpperCase();
+        const key=lot+"_"+plan;
+        if(!subdivisions.some(function(sub){ return (sub.lot+"_"+sub.plan)===key; })){
+          subdivisions.push({lot:lot,plan:plan,areaSqm:null,raw:m[0]});
+        }
+      });
+
+      let current=null;
+      const pushCurrent=function(){
+        if(!current) return;
+        if(!current.lot && !current.plan) return;
+        if(typeof current.areaSqm!=="number"||!isFinite(current.areaSqm)){
+          current.areaSqm=null;
+        }
+        const key=(current.lot||"")+"_"+(current.plan||"");
+        if(!subdivisions.some(function(sub){ return (sub.lot+"_"+sub.plan)===key; })){
+          subdivisions.push({
+            lot:current.lot||null,
+            plan:current.plan||null,
+            areaSqm:current.areaSqm,
+            raw:current.raw
+          });
+        }
+      };
+
+      for(var idx=0; idx<lines.length; idx++){
+        const line=lines[idx];
+        const normalized=line.replace(/\s+/g," ");
+        const lotMatch=normalized.match(lotRegex);
+        var planMatch=normalized.match(planRegex);
+        if(!planMatch) planMatch=normalized.match(planLooseRegex);
+        const comboMatch=normalized.match(comboRegex);
+        const areaMatch=normalized.match(areaRegex);
+
+        var candidateLot=null;
+        var candidatePlan=null;
+        if(comboMatch){
+          candidateLot=comboMatch[1].toUpperCase();
+          candidatePlan=comboMatch[2].replace(/[\s-]+/g,"").toUpperCase();
+        }
+        if(lotMatch){
+          candidateLot=lotMatch[1].toUpperCase();
+        }
+        if(planMatch){
+          candidatePlan=planMatch[1].replace(/[\s-]+/g,"").toUpperCase();
+          if(!candidateLot && typeof planMatch.index==="number"){
+            const prefix=normalized.slice(0, planMatch.index).trim();
+            const inline=prefix.match(/(\d+[A-Za-z-]?)/);
+            if(inline) candidateLot=inline[1].toUpperCase();
+          }
+        }
+
+        const shouldStartNew=!current||
+          (candidateLot&&current.lot&&candidateLot!==current.lot)||
+          (candidatePlan&&current.plan&&candidatePlan!==current.plan);
+
+        if(shouldStartNew){
+          pushCurrent();
+          current={lot:null,plan:null,areaSqm:null,raw:normalized};
+        }else if(current){
+          current.raw=normalized;
+        }else{
+          current={lot:null,plan:null,areaSqm:null,raw:normalized};
+        }
+
+        if(candidateLot){
+          current.lot=candidateLot;
+        }
+        if(candidatePlan){
+          current.plan=candidatePlan;
+        }
+        if(areaMatch){
+          const parsed=parseFloat(areaMatch[1].replace(/,/g,""));
+          if(!isNaN(parsed)){
+            current.areaSqm=parsed;
+          }
+        }
+      }
+      pushCurrent();
+      return subdivisions;
+    }
+function framedExtent(geom){
       try{
         var b=geometryEngine.buffer(geom,SCREEN_BUFFER_METERS,"meters");
         return (b&&b.extent)?b.extent:(geom&&geom.extent);
@@ -294,10 +482,43 @@
       }catch(e){}
       return null;
     };
+    const projectToViewSR=function(geom){
+      try{
+        if(!geom || !view || !view.spatialReference) return geom;
+        if(!geom.spatialReference){
+          geom.spatialReference = { wkid: 102100 };
+        }
+        const gSR = (geom.spatialReference && (geom.spatialReference.wkid||geom.spatialReference.latestWkid));
+        const vSR = (view.spatialReference && (view.spatialReference.wkid||view.spatialReference.latestWkid));
+        if(gSR && vSR && gSR===vSR) return geom;
+        const proj = geometryEngine.project(geom, view.spatialReference);
+        return proj || geom;
+      }catch(e){ return geom; }
+    };
+    function normalizeToWebMercator(geom){
+      try{
+        if(!geom) return geom;
+        const sr = (geom.spatialReference && (geom.spatialReference.wkid||geom.spatialReference.latestWkid));
+        if(sr===102100 || sr===3857) return geom;
+        const sample = geom.type==="point" ? geom :
+          geom.type==="polyline" ? (geom.paths && geom.paths[0] && geom.paths[0][0]) :
+          geom.type==="polygon" ? (geom.rings && geom.rings[0] && geom.rings[0][0]) : null;
+        if(sample){
+          const x = sample.x!=null ? sample.x : sample[0];
+          const y = sample.y!=null ? sample.y : sample[1];
+          if(Math.abs(x)>180 || Math.abs(y)>90){
+            geom.spatialReference = { wkid:102100 };
+            return geom;
+          }
+        }
+        const projected = geometryEngine.project(geom, {wkid:102100});
+        return projected || geom;
+      }catch(e){ return geom; }
+    }
 
     /* ---------------- Map & rules ---------------- */
     const portal=new Portal({url:"https://cornerstonebc.maps.arcgis.com"});
-    // 🔁 Use Logan WebMap item id
+    // Use Logan WebMap item id
     let webmap=new WebMap({portalItem:{id:"e58a1a64e2e747cbb667ffd0b4e01b33",portal:portal}});
     const selLayer=new GraphicsLayer({listMode:"hide"}); webmap.add(selLayer);
     // Use provided center/scale
@@ -834,16 +1055,16 @@
     }
     const ZONE_KEYS=["ZONE_CODE","ZONE","ZONE_NAME","ZONING","ZONE_LABEL","ZONE_DESC","ZONE_TYPE","ZONE_CATEGORY","PLANNING_ZONE"];
     function pickZoneLabel(attrs){
-      if(!attrs) return null;
-      const code=String(valOr(attrs.ZONE_CODE, attrs.ZONE) || "").trim();
-      const name=String(valOr(attrs.ZONE_NAME, attrs.ZONING) || "").trim();
-      if(code && name) return code + " – " + name;
-      for(var i=0;i<ZONE_KEYS.length;i++){
-        var k=ZONE_KEYS[i], v=attrs[k];
-        if(v!=null && String(v).trim()) return String(v).trim();
-      }
-      return null;
-    }
+  if(!attrs) return null;
+  const code=String(valOr(attrs.ZONE_CODE, attrs.ZONE) || "").trim();
+  const name=String(valOr(attrs.ZONE_NAME, attrs.ZONING) || "").trim();
+  if(code && name) return code + " - " + name;
+  for(var i=0;i<ZONE_KEYS.length;i++){
+    var k=ZONE_KEYS[i], v=attrs[k];
+    if(v!=null && String(v).trim()) return String(v).trim();
+  }
+  return null;
+}
     async function legendFromRendererUsingFeatures(layerNode,lotGeom){
       const gt=String(layerNode.geometryType||"").toLowerCase();
       const isZone=isZoning(layerNode.title||"",nodePath(layerNode));
@@ -880,7 +1101,7 @@
                 const min=(b.minValue==null?-Infinity:b.minValue), max=(b.maxValue==null?Infinity:b.maxValue);
                 return v>=min && v<=max;
               });
-              label = (cbi && (cbi.label!=null ? cbi.label : (String(valOr(cbi.minValue,""))+" – "+String(valOr(cbi.maxValue,""))))) || label;
+              label = (cbi && (cbi.label!=null ? cbi.label : (String(valOr(cbi.minValue,"")) + " to " + String(valOr(cbi.maxValue,""))))) || label;
             }
           }
           if(!label) label=(r2 && r2.label) || layerNode.title || guessLabelFromAttrs(f.attributes) || "Class";
@@ -1116,7 +1337,7 @@
     async function buildAndOpenReport(){
       try{
         showLoading(true);
-        setRpt("Locating parcel…", 12);
+        setRpt("Locating parcel...", 12);
         var geom=null, lotText="--", areaText="-- "+M2, classText="--", addressText="--", councilText="Logan City Council";
         if(lastParcelInfo.feature){
           geom=lastParcelInfo.feature.geometry; lotText=lastParcelInfo.lotText; areaText=lastParcelInfo.areaText; classText=lastParcelInfo.classText; addressText=lastParcelInfo.addressText; councilText=lastParcelInfo.councilText;
@@ -1131,18 +1352,18 @@
         setRpt("Parcel located", 18, "rptS1");
 
         if(geom){
-          setRpt("Resolving address…", 25);
+          setRpt("Resolving address...", 25);
           try{ addressText=await resolveBestAddress(geom,lastParcelInfo.feature); }catch(e){}
           setRpt("Address resolved", 35, "rptS2");
           lastParcelInfo.addressText = addressText || lastParcelInfo.addressText;
         }
 
-        setRpt("Rendering base map…", 42);
+        setRpt("Rendering base map...", 42);
         const baseShot = geom
           ? await withViewOnGeom(geom, async function(){ try{selLayer.visible=true;}catch(e){}; await waitViewIdle(200); return await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height}); })
           : await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height});
 
-        setRpt("Collecting overlays…", 55);
+        setRpt("Collecting overlays...", 55);
         var cats;
         if(geom){
           cats = await (async function(){
@@ -1186,13 +1407,13 @@
         ];
         for(var ti=0;ti<tasks.length;ti++){
           const name=tasks[ti][0], fn=tasks[ti][1];
-          setRpt("Rendering " + name + "…", 55 + Math.round(((ti+1)/tasks.length)*30));
+          setRpt("Rendering " + name + "...", 55 + Math.round(((ti+1)/tasks.length)*30));
           await fn();
         }
         dedupeShotsByTitle(shots,"Transport Noise Corridor");
         setRpt("Overlays rendered", 87, "rptS3");
 
-        setRpt("Composing document…", 93);
+        setRpt("Composing document...", 93);
         const now=new Date();
         const fmt=function(d){ return d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}); };
         const esc=htmlEsc;
@@ -1203,7 +1424,7 @@
         const baseName = (lastParcelInfo.addressText && lastParcelInfo.addressText !== "--")
           ? lastParcelInfo.addressText
           : ((lastParcelInfo.lotText && lastParcelInfo.lotText !== "--") ? ("Lot " + lastParcelInfo.lotText) : "Property");
-        const reportDisplayTitle = baseName + " — Property Report";
+        const reportDisplayTitle = baseName + " - Property Report";
         const reportFileTitle = toFileSafe(reportDisplayTitle);
 
         const html=[];
@@ -1236,7 +1457,7 @@
         html.push(
           "<div class='card brandbar'>",
             "<img src='",logoSrc,"' alt='Logo' style='width:28px;height:28px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>",
-            "<h1>", esc((lastParcelInfo.addressText && lastParcelInfo.addressText!=="--") ? lastParcelInfo.addressText : "Logan Interactive Mapping — Property Report"), "</h1>",
+            "<h1>", esc((lastParcelInfo.addressText && lastParcelInfo.addressText!=="--") ? lastParcelInfo.addressText : "Logan Interactive Mapping - Property Report"), "</h1>",
             "<div class='muted'>",fmt(now),"</div>",
           "</div>"
         );
@@ -1276,14 +1497,14 @@
         for(var si2=0;si2<shots.length;si2++){
           var s=shots[si2];
           html.push("<div class='card' id='",s.id,"'>",
-            "<div class='overlay-header'><h2 class='section-title' style='margin:0'>",esc(s.title),"</h2><a class='backbtn' href='#summary'>Back to Summary ↑</a></div>",
+            "<div class='overlay-header'><h2 class='section-title' style='margin:0'>",esc(s.title),"</h2><a class='backbtn' href='#summary'>Back to Summary</a></div>",
             "<img class='map' src='",s.dataUrl,"' alt='",esc(s.title),"'>",
             (s.note ? "<div class='note'>"+esc(s.note)+"</div>" : ""),
             "<div class='leg'>", (s.legendHTML || ""), "</div>",
           "</div>");
         }
 
-        html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>© Logan City Council — CornerstonePlus. Indicative only.</div>");
+        html.push("<div class='card rpt-footer'><img src='"+logoSrc+"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/> (c) Logan City Council - CornerstonePlus. Indicative only.</div>");
         html.push("</body>");
 
         const w=window.open("about:blank","_blank");
@@ -1316,6 +1537,160 @@
           if (history.length > 1) { history.back(); } else { window.location.href = "./"; }
         });
     });
+
+    /* ---------------- POD Upload ---------------- */
+    (function initPodUpload(){
+      const form = $("podForm");
+      const input = $("podFile");
+      const statusEl = $("podStatus");
+      const list = $("podResultList");
+      const wrap = $("podResultWrap");
+      const submitBtn = $("podSubmitBtn");
+      if(!form || !input || !statusEl) return;
+
+      const setStatus = function(msg, isError){
+        statusEl.textContent = msg;
+        statusEl.classList.toggle("error", !!isError);
+      };
+      const setBusy = function(busy){
+        if(submitBtn){
+          submitBtn.disabled = busy;
+          submitBtn.textContent = busy ? "Uploading..." : "Upload & Import";
+        }
+        if(input){
+          input.disabled = busy;
+        }
+      };
+      const renderResults = function(items){
+        items = items || [];
+        if(!wrap || !list) return;
+        if(!items.length){
+          wrap.hidden = true;
+          list.innerHTML = "";
+          return;
+        }
+        wrap.hidden = false;
+        list.innerHTML = items.map(function(sub){
+          const lotRaw = sub.lot || "";
+          const planRaw = sub.plan || "";
+          const lot = htmlEsc(lotRaw || "?");
+          const plan = htmlEsc(planRaw || "Unknown plan");
+          const area = sub.areaSqm ? (sub.areaSqm.toLocaleString()+" sqm") : "Area N/A";
+          const btn = (sub.lot && sub.plan)
+            ? "<button class=\"pod-zoom-btn\" data-lot=\""+attrEsc(lotRaw)+"\" data-plan=\""+attrEsc(planRaw)+"\">Use</button>"
+            : "";
+          return "<li><div class=\"pod-result-row\">"+btn+"<div>Lot "+lot+" on "+plan+" ("+area+")</div></div></li>";
+        }).join("");
+      };
+      list && list.addEventListener("click", async function(evt){
+        const btn = evt.target.closest(".pod-zoom-btn");
+        if(!btn) return;
+        evt.preventDefault();
+        let lot = btn.getAttribute("data-lot");
+        let plan = btn.getAttribute("data-plan");
+        if(!lot || !plan){
+          const txt = (btn.closest(".pod-result-row") || {}).innerText || "";
+          const m = txt.match(/Lot\\s+(\\S+)\\s+on\\s+(\\S+)/i);
+          if(m){ lot = m[1]; plan = m[2]; }
+        }
+        if(!lot || !plan){
+          setStatus("Missing lot/plan on selection.", true);
+          return;
+        }
+        setBusy(true);
+        setStatus("Zooming to Lot "+lot+" on "+plan+"...");
+        const ok = await focusOnLotPlan(lot, plan);
+        setBusy(false);
+        setStatus(ok ? ("Focused on Lot "+lot+" on "+plan+".") : ("Could not locate Lot "+lot+" on "+plan+" in the available parcel datasets."), !ok);
+      });
+
+      input.addEventListener("change",function(){
+        const file = input.files && input.files[0];
+        const nameEl = $("podFileName");
+        if(file){
+          if(nameEl) nameEl.textContent = file.name;
+          setStatus("Ready to import "+file.name);
+        }else{
+          if(nameEl) nameEl.textContent = "No file chosen";
+          setStatus("Select a POD PDF to begin.");
+          renderResults([]);
+        }
+      });
+
+      form.addEventListener("submit", async function(evt){
+        evt.preventDefault();
+        if(!input.files || !input.files.length){
+          setStatus("Choose a POD PDF first.", true);
+          return;
+        }
+        const file = input.files[0];
+
+        setBusy(true);
+        setStatus("Parsing PDF locally...");
+        renderResults([]);
+
+        try{
+          const text = await extractPdfText(file);
+          if(!text || !text.trim()){
+            throw new Error("PDF did not contain readable text.");
+          }
+          const subdivisions = parseSubdivisionsFromText(text);
+          renderResults(subdivisions);
+
+          const count = subdivisions.length;
+          let msg = count ? ("Parsed "+count+" subdivision"+(count===1? "":"s")+" locally.") : "No subdivisions detected.";
+          let statusError = false;
+          const focusTarget = subdivisions.find(function(sub){ return sub.lot && sub.plan; });
+          if(count === 1 && focusTarget){
+            const zoomed = await focusOnLotPlan(focusTarget.lot, focusTarget.plan);
+            if(zoomed){
+              msg += " Zoomed to Lot "+focusTarget.lot+" on "+focusTarget.plan+".";
+            }else{
+              msg += " Could not locate Lot "+focusTarget.lot+" on "+focusTarget.plan+" in the available parcel datasets.";
+              statusError = true;
+            }
+          }else if(count > 1){
+            msg += " Choose a lot below to zoom.";
+          }
+          msg += " Upload to ArcGIS coming soon.";
+          setStatus(msg, statusError);
+        }catch(err){
+          console.error(err);
+          setStatus(err.message || "Local parsing failed", true);
+        }finally{
+          setBusy(false);
+        }
+      });
+
+      const dropZone = $("podDropZone");
+      const setFile = function(file){
+        if(!file) return;
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        input.files = dt.files;
+        const nameEl = $("podFileName");
+        if(nameEl) nameEl.textContent = file.name;
+        setStatus("Ready to import "+file.name);
+      };
+      const prevent = function(e){ e.preventDefault(); e.stopPropagation(); };
+      ["dragenter","dragover","dragleave","drop"].forEach(function(ev){
+        if(dropZone) dropZone.addEventListener(ev, prevent);
+      });
+      if(dropZone){
+        dropZone.addEventListener("dragenter", function(){ dropZone.classList.add("dragover"); });
+        dropZone.addEventListener("dragleave", function(){ dropZone.classList.remove("dragover"); });
+        dropZone.addEventListener("dragend", function(){ dropZone.classList.remove("dragover"); });
+        dropZone.addEventListener("drop", function(ev){
+          dropZone.classList.remove("dragover");
+          const file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+          if(file && file.type==="application/pdf"){
+            setFile(file);
+          }else{
+            setStatus("Drop a PDF file.", true);
+          }
+        });
+      }
+    })();
 
     /* ============================================================
        === Lot/Plan Search source (QLD) ============================
@@ -1406,6 +1781,67 @@
       return parts.join(" AND ");
     }
 
+    function buildFallbackLotPlanWhere(lot, plan){
+      if(!lot || !plan) return null;
+      const lotU = escSQL(String(lot).toUpperCase());
+      const planU = escSQL(plan.toUpperCase());
+      const planCompact = escSQL(plan.toUpperCase().replace(/[^A-Z0-9]/g,""));
+      const lotPlanFull = escSQL((String(lot)+"/"+plan).toUpperCase());
+      const lotPlanCompact = escSQL((String(lot)+plan).toUpperCase().replace(/[^A-Z0-9]/g,""));
+      return [
+        "(",
+        "  UPPER(lot)='"+lotU+"'",
+        "  OR UPPER(lotplan) LIKE '%"+lotPlanFull+"%'",
+        "  OR REPLACE(REPLACE(REPLACE(UPPER(lotplan),' ',''),'-',''),'/','') LIKE '%"+lotPlanCompact+"%'",
+        ") AND (",
+        "  UPPER(plan) LIKE '%"+planU+"%'",
+        "  OR REPLACE(REPLACE(REPLACE(UPPER(plan),' ',''),'-',''),'/','') LIKE '%"+planCompact+"%'",
+        "  OR REPLACE(REPLACE(REPLACE(UPPER(lotplan),' ',''),'-',''),'/','') LIKE '%"+lotPlanCompact+"%'",
+        ")"
+      ].join("\\n");
+    }
+
+    async function queryLotPlanFallback(lot, plan){
+      if(!LOTPLAN_FALLBACK_URLS.length) return [];
+      const results=[];
+      const compact = (""+lot+plan).toUpperCase().replace(/[^A-Z0-9]/g,"");
+      for(const url of LOTPLAN_FALLBACK_URLS){
+        const isLotplanOnly = /LandParcelPropertyFramework/gi.test(url);
+        const where = isLotplanOnly
+          ? "UPPER(lotplan)='"+compact+"'"
+          : (buildFallbackLotPlanWhere(lot, plan) || "UPPER(lotplan)='"+compact+"'");
+        try{
+          const params = new URLSearchParams({
+            f:"json",
+            where:where,
+            outFields:"*",
+            returnGeometry:"true",
+            outSR:String((view && view.spatialReference && view.spatialReference.wkid)||3857),
+            maxRecordCountFactor:"5"
+          });
+          const res = await fetch(url+"/query",{
+            method:"POST",
+            headers:{"Content-Type":"application/x-www-form-urlencoded"},
+            body:params
+          });
+          if(!res.ok) throw new Error("Fallback lot plan query failed: "+res.status);
+          const json = await res.json();
+          (json.features||[]).forEach(function(f){
+            const g = (Graphic.fromJSON ? Graphic.fromJSON(f) : new Graphic({geometry:f.geometry,attributes:f.attributes}));
+            if(!g.geometry && f.geometry) g.geometry = f.geometry;
+            if(g.geometry && !g.geometry.spatialReference && view && view.spatialReference){
+              g.geometry.spatialReference = view.spatialReference;
+            }
+            results.push({layer:{title:"Lot/Plan (Fallback)"}, feature:g});
+          });
+          if(results.length) break;
+        }catch(e){
+          console.warn("Lot/Plan fallback error:", e);
+        }
+      }
+      return results;
+    }
+
     async function queryLotPlanAcrossLayers(lot, plan){
       const layers = await getParcelLayers();
       const out=[];
@@ -1425,7 +1861,37 @@
           }
         }catch(e){ /* per-layer errors ignored */ }
       }
+      if(!out.length){
+        const fallback = await queryLotPlanFallback(lot, plan);
+        if(fallback && fallback.length) out.push.apply(out,fallback);
+      }
       return out;
+    }
+
+    async function focusOnLotPlan(lot, plan){
+      if(!lot || !plan) return false;
+      try{
+        await view.when();
+        showLoading(true);
+        console.log("[LotPlan] searching", lot, plan);
+        const fb = await queryLotPlanFallback(lot, plan);
+        if(fb && fb.length){
+          await focusOnParcelFeature(fb[0].feature,{shouldZoom:true});
+          return true;
+        }
+        const matches = await queryLotPlanAcrossLayers(lot, plan);
+        if(matches && matches.length){
+          await focusOnParcelFeature(matches[0].feature,{shouldZoom:true});
+          return true;
+        }
+        console.warn("[LotPlan] no hits for", lot, plan);
+        return false;
+      }catch(err){
+        console.warn("focusOnLotPlan error:", err);
+        return false;
+      }finally{
+        showLoading(false);
+      }
     }
 
     const lotPlanSource = {
@@ -1444,7 +1910,7 @@
         const matches = await queryLotPlanAcrossLayers(p.lot, p.plan);
         return matches.map(function(m,i){
           var ext = (m.feature && m.feature.geometry && m.feature.geometry.extent) ? m.feature.geometry.extent : null;
-          return { name: "Lot "+p.lot+" on "+p.plan+" — "+(m.layer.title||"Parcels"), feature: m.feature, extent: ext };
+          return { name: "Lot "+p.lot+" on "+p.plan+" - "+(m.layer.title||"Parcels"), feature: m.feature, extent: ext };
         });
       },
       zoomScale: 1000
@@ -1455,16 +1921,8 @@
     search.on("select-result", async function(e){
       try{
         const feat = e.result && e.result.feature;
-        if(feat && feat.geometry && feat.geometry.type==="polygon"){
-          updateBadgesFromFeature(feat);
-          outlineSelection(feat.geometry);
-          await hideUnusedOverlaysFor(feat.geometry);
-          try{
-            const addr=await resolveBestAddress(feat.geometry, feat);
-            lastParcelInfo.addressText=addr||lastParcelInfo.addressText;
-            updateSummaryPanel();
-          }catch(err){}
-          updateSideOverlaySummary(feat.geometry);
+        if(feat && feat.geometry){
+          await focusOnParcelFeature(feat,{shouldZoom:true});
         }
       }catch(err){ console.warn("select-result handler:", err); }
     });
@@ -1489,7 +1947,7 @@
     async function updateSideOverlaySummary(geom){
       const ul = $("sumOverlays");
       if (!ul) return;
-      ul.innerHTML = "<li><i>Scanning…</i></li>";
+      ul.innerHTML = "<li><i>Scanning...</i></li>";
 
       const items = [];
       const nodes = flattenFeatureNodes().filter(function(n){ return !underDNTChain(n); });
@@ -1531,22 +1989,50 @@
         : "<li><i>No overlays intersect this parcel.</i></li>";
     }
 
+    async function focusOnParcelFeature(feat,{shouldZoom=false}={}){
+      if(!feat || !feat.geometry) return;
+      const geom = normalizeToWebMercator(projectToViewSR(feat.geometry));
+      feat.geometry = geom;
+      updateBadgesFromFeature(feat);
+      selLayer.removeAll();
+      if(geom.type==="point" || geom.type==="multipoint"){
+        selLayer.add(new Graphic({geometry:geom,symbol:{type:"simple-marker",style:"circle",size:10,color:[167,11,19,0.2],outline:{color:"#a70b13",width:2}}}));
+      }else{
+        outlineSelection(geom);
+      }
+      await hideUnusedOverlaysFor(geom);
+      try{
+        const addr=await resolveBestAddress(geom, feat);
+        lastParcelInfo.addressText=addr||lastParcelInfo.addressText||"Address unavailable";
+        updateSummaryPanel();
+      }catch(e){}
+      updateSideOverlaySummary(geom);
+      if(shouldZoom){
+        try{
+          if(geom.type==="point" || geom.type==="multipoint"){
+            await view.goTo({target:geom, zoom:18});
+          }else{
+            const ext = geom.extent || framedExtent(geom);
+            if(ext){
+              await view.goTo({target:ext.expand(1.2), animate:true});
+            }else if(geom.centroid){
+              await view.goTo({target:geom.centroid, zoom:18});
+            }else{
+              await view.goTo({target:geom, zoom:18});
+            }
+          }
+        }catch(err){
+          console.warn("goTo failed", err);
+        }
+      }
+    }
+
     view.on("click", async function(ev){
       try{
         showLoading(true);
         const parcel=await findParcelAtPoint(ev.mapPoint);
         if(!parcel){ selLayer.removeAll(); return; }
-        updateBadgesFromFeature(parcel);
-        outlineSelection(parcel.geometry);
-        await hideUnusedOverlaysFor(parcel.geometry);
-
-        try{
-          const addr=await resolveBestAddress(parcel.geometry, parcel);
-          lastParcelInfo.addressText=addr||lastParcelInfo.addressText;
-          updateSummaryPanel();
-        }catch(e){}
-
-        updateSideOverlaySummary(parcel.geometry);
+        await focusOnParcelFeature(parcel,{shouldZoom:true});
       } finally { showLoading(false); }
     });
   </script>

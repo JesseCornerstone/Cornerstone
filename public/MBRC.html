@@ -153,7 +153,7 @@
           <h2 class="section-title">Property</h2>
           <div class="kv">
             <div><b>Lot/Plan:</b> <span id="sumLot">--</span></div>
-            <div><b>Area:</b> <span id="sumArea">-- mA?</span></div>
+            <div><b>Area:</b> <span id="sumArea">-- m</span></div>
             <div><b>Class:</b> <span id="sumClass">--</span></div>
             <div><b>Address:</b> <span id="sumAddress">--</span></div>
             <div><b>Council:</b> <span id="sumCouncil">Moreton Bay Regional Council</span></div>
@@ -1264,11 +1264,20 @@
     }
 
     document.getElementById("btnPrintReport").addEventListener("click", async ()=>{
+      // Open the report window immediately on user gesture so Safari/Popup blockers allow it
+      const prepWin = window.open("about:blank","_blank");
+      if(prepWin){
+        prepWin.document.write("<!doctype html><title>Preparing report…</title><p style='font-family:system-ui,sans-serif;padding:16px'>Preparing report…</p>");
+        prepWin.document.close();
+      }else{
+        alert("Please allow pop-ups in your browser to generate the report.");
+        return;
+      }
       document.getElementById("rptOverlay").style.display="grid";
-      try{ await buildAndOpenReport(); } finally { document.getElementById("rptOverlay").style.display="none"; }
+      try{ await buildAndOpenReport(prepWin); } finally { document.getElementById("rptOverlay").style.display="none"; }
     });
 
-    async function buildAndOpenReport(){
+    async function buildAndOpenReport(preopenedWindow){
       try{
         showLoading(true);
         setRpt("Locating parcel…", 12);
@@ -1433,7 +1442,7 @@
         html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>© Moreton Bay Regional Council — CornerstonePlus. Indicative only.</div>");
         html.push("</body>");
 
-        const w=window.open("about:blank","_blank");
+        const w=preopenedWindow || window.open("about:blank","_blank");
         if(w){
           w.document.open();
           w.document.write(html.join(""));

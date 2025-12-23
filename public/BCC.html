@@ -2971,7 +2971,7 @@
 
         f: "json",
 
-        returnGeometry: "false",
+        returnGeometry: "true",
 
         outFields: "PROPERTY_ID",
 
@@ -2981,7 +2981,9 @@
 
         inSR: String(sr),
 
-        resultRecordCount: "1"
+        outSR: String(sr),
+
+        resultRecordCount: "5"
 
       });
 
@@ -3003,10 +3005,27 @@
 
       const json = await res.json();
 
-      const attrs = json?.features?.[0]?.attributes;
+      const features = json?.features || [];
 
+      if(!features.length) return null;
+
+      if(geometryType === "esriGeometryPolygon" && typeof geometryEngine?.intersect === "function"){
+        let bestId = null;
+        let bestArea = -1;
+        for(const f of features){
+          const id = f?.attributes?.PROPERTY_ID ?? f?.attributes?.property_id ?? null;
+          if(id == null || !f?.geometry) continue;
+          try{
+            const inter = geometryEngine.intersect(geom, f.geometry);
+            const area = inter ? Math.abs(geometryEngine.planarArea(inter, "square-meters") || 0) : 0;
+            if(area > bestArea){ bestArea = area; bestId = id; }
+          }catch{}
+        }
+        if(bestId != null) return bestId;
+      }
+
+      const attrs = features?.[0]?.attributes;
       const id = attrs?.PROPERTY_ID ?? attrs?.property_id ?? null;
-
       return id==null ? null : id;
 
     }
@@ -3033,7 +3052,7 @@
 
           if(cen){
 
-            candidate = await tryFetch(`distance(geo_point_2d,geopoint'${cen.longitude} ${cen.latitude}')<15`);
+            candidate = await tryFetch(`distance(geo_point_2d,geopoint'${cen.longitude} ${cen.latitude}')<5`);
 
             if(candidate) return String(candidate);
 

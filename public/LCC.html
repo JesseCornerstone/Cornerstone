@@ -154,6 +154,50 @@
   .rptStep{background:#fbfbfc;border:1px dashed #e2e4e8;border-radius:10px;padding:10px;font-size:12px;color:#475467}
   .rptDone{border-color:#cfe6d2;background:#f2faf3;color:#1e7a31;font-weight:600}
 
+  /* Payment access gate */
+  #accessGate{
+    position:fixed;
+    inset:0;
+    display:none;
+    z-index:10000;
+    background:rgba(12,14,18,.78);
+    backdrop-filter:blur(3px);
+    color:#f6f7fb;
+    place-items:center;
+    padding:24px;
+  }
+  #accessGate.active{display:grid;}
+  .gate-card{
+    width:min(560px,92vw);
+    background:#14161b;
+    border:1px solid #2b2f38;
+    border-radius:18px;
+    padding:22px 24px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .gate-title{margin:0 0 8px;font-size:20px;letter-spacing:.2px}
+  .gate-msg{margin:0 0 14px;color:#c8cbd6;font-size:14px}
+  .gate-timer{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:#c03b41;background:#1b1d24;border:1px solid #2f333d;border-radius:999px;padding:6px 10px;margin-bottom:14px}
+  .gate-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .gate-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:none;
+    border-radius:999px;
+    padding:10px 16px;
+    background:#c03b41;
+    color:#fff;
+    cursor:pointer;
+    text-decoration:none;
+    font-weight:600;
+  }
+  .gate-btn.secondary{
+    background:transparent;
+    border:1px solid #3a3f4c;
+    color:#e3e6ef;
+  }
+
   #sumOverlays{ max-height: 320px; overflow: auto; padding-right: 6px; scrollbar-width: thin; scrollbar-color: #c7cbd1 transparent; }
   #sumOverlays::-webkit-scrollbar{ width: 8px; }
   #sumOverlays::-webkit-scrollbar-thumb{ background:#c7cbd1; border-radius:6px; }
@@ -258,6 +302,17 @@
     <span id="statusScale">Scale: --</span>
   </div>
 
+  <div id="accessGate" aria-hidden="true">
+    <div class="gate-card" role="dialog" aria-modal="true">
+      <h2 id="accessGateTitle" class="gate-title">Access required</h2>
+      <p id="accessGateMsg" class="gate-msg">A valid purchase is required to use this map.</p>
+      <div class="gate-actions">
+        <a id="accessPayLink" class="gate-btn" href="#" rel="noopener">Go to payment</a>
+        <button id="accessGateHome" class="gate-btn secondary" type="button">Back to home</button>
+      </div>
+    </div>
+  </div>
+
   <div id="rptOverlay" aria-hidden="true">
     <div id="rptCard">
       <div id="rptBrand">
@@ -309,7 +364,7 @@
     const SWATCH_PX = 16;
     const GEOCODER_URL = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer";
     const LOGAN=[153.1024711187046,-27.76239839483306]; // Provided center
-    const START_SCALE = 36111.909643; // Provided scale
+    const START_SCALE = 36111.909643; // Provided scale (unused after aligning zoom)
     const M2="m2";
     const HOUSES_OUT = 3;
     const HOUSE_LOT_METERS = 25;
@@ -351,6 +406,182 @@
     const raf=function(){ return new Promise(function(r){ requestAnimationFrame(function(){ r(); }); }); };
     const sleep=function(ms){ return new Promise(function(r){ setTimeout(r,ms); }); };
     const waitViewIdle=async function(extra){ extra = (typeof extra==="number")?extra:240; try{ await reactiveUtils.whenOnce(function(){ return !view.updating; }); }catch(e){} await raf(); await sleep(extra); };
+
+    /* ---------------- Access gate ---------------- */
+    const accessState = {
+      key: null,
+      expiresAt: null,
+      active: false,
+      paymentUrl: null,
+      countdownTimer: null
+    };
+
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/14AbJ11vU3gtbdNcMF7ss02";
+
+    const getQueryParam = function(name){
+      try{
+        return new URLSearchParams(window.location.search).get(name);
+      }catch(e){
+        return null;
+      }
+    };
+
+    const formatRemaining = function(ms){
+      if(ms < 0) ms = 0;
+      var total = Math.floor(ms / 1000);
+      var h = Math.floor(total / 3600);
+      var m = Math.floor((total % 3600) / 60);
+      var s = total % 60;
+      return h > 0
+        ? h + ":" + String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0")
+        : m + ":" + String(s).padStart(2,"0");
+    };
+
+    const setGateVisible = function(on){
+      var gate = $("accessGate");
+      if(!gate) return;
+      gate.classList.toggle("active", !!on);
+      gate.setAttribute("aria-hidden", on ? "false" : "true");
+    };
+
+    const setGateMessage = function(title, msg){
+      setText("accessGateTitle", title);
+      setText("accessGateMsg", msg);
+    };
+
+    const setPaymentLink = function(url){
+      var link = $("accessPayLink");
+      if(link) link.href = url || PAYMENT_FALLBACK_URL;
+    };
+
+    const setTimerVisible = function(show){
+      var timer = $("accessGateTimer");
+      if(timer) timer.hidden = !show;
+    };
+
+    const loadPaymentUrl = async function(){
+      try{
+        var res = await fetch("/api/payment-config", { cache: "no-store" });
+        if(res.ok){
+          var json = await res.json();
+          if(json && json.paymentUrl) return json.paymentUrl;
+        }
+      }catch(e){}
+      return null;
+    };
+
+    const checkToken = async function(key){
+      try{
+        var res = await fetch("/api/check-token?key=" + encodeURIComponent(key), { cache: "no-store" });
+        if(res.ok){
+          var json = await res.json();
+          return { ok: true, expiresAt: json.expiresAt };
+        }
+        var text = await res.text();
+        var msg = "Access denied.";
+        try{
+          var parsed = JSON.parse(text);
+          if(parsed && parsed.error) msg = parsed.error;
+        }catch(e){}
+        return { ok: false, error: msg };
+      }catch(e){
+        return { ok: false, error: "Access check failed." };
+      }
+    };
+
+    const startCountdown = function(expiresAt){
+      var expiry = new Date(expiresAt);
+      var tick = function(){
+        var ms = expiry - new Date();
+        if(ms <= 0){
+          stopCountdown();
+          handleExpiry();
+          return;
+        }
+        var el = $("accessCountdown");
+        if(el) el.textContent = formatRemaining(ms);
+      };
+      tick();
+      accessState.countdownTimer = setInterval(tick, 1000);
+      setTimerVisible(true);
+    };
+
+    const stopCountdown = function(){
+      if(accessState.countdownTimer){
+        clearInterval(accessState.countdownTimer);
+        accessState.countdownTimer = null;
+      }
+    };
+
+    const handleExpiry = function(){
+      accessState.active = false;
+      setGateMessage("Session expired", "Your 24-hour access window has ended. Please purchase again to continue.");
+      setGateVisible(true);
+      setTimerVisible(false);
+    };
+
+    const initAccessGate = async function(){
+      accessState.key = getQueryParam("key");
+      var sessionId = getQueryParam("session_id");
+      accessState.paymentUrl = await loadPaymentUrl();
+      setPaymentLink(accessState.paymentUrl || PAYMENT_FALLBACK_URL);
+
+      var homeBtn = $("accessGateHome");
+      if(homeBtn){
+        homeBtn.addEventListener("click", function(){ window.location.href = "Index.html"; });
+      }
+
+      if(!accessState.key && sessionId){
+        var returnPath = "LCC.html";
+        window.location.href = "/api/stripe/success?session_id=" + encodeURIComponent(sessionId) + "&return=" + encodeURIComponent(returnPath);
+        return;
+      }
+
+      if(!accessState.key){
+        setGateMessage("Payment required", "A valid purchase is required to use this map.");
+        setGateVisible(true);
+        setTimerVisible(false);
+        return;
+      }
+
+      var result = await checkToken(accessState.key);
+      if(!result.ok){
+        setGateMessage("Access denied", result.error || "This access link is invalid or expired.");
+        setGateVisible(true);
+        setTimerVisible(false);
+        return;
+      }
+
+      accessState.active = true;
+      accessState.expiresAt = result.expiresAt;
+      setGateVisible(false);
+      startCountdown(result.expiresAt);
+    };
+
+    const isAccessActive = function(){
+      if(!accessState.active || !accessState.expiresAt) return false;
+      return new Date(accessState.expiresAt) > new Date();
+    };
+
+    const finalizeTokenAndLock = async function(){
+      if(!accessState.key){
+        setGateMessage("Payment required", "A valid purchase is required to use this map.");
+        setGateVisible(true);
+        setTimerVisible(false);
+        return;
+      }
+      try{
+        await fetch("/api/finalise-token?key=" + encodeURIComponent(accessState.key), { method: "POST" });
+      }catch(e){}
+      stopCountdown();
+      accessState.active = false;
+      setGateMessage("Payment required", "Access used. Please purchase again to continue.");
+      setGateVisible(true);
+      setTimerVisible(false);
+    };
+
+    initAccessGate();
+
     const slug=function(s){ s=String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); return s; };
     const htmlEsc=function(s){ s=String((s===undefined||s===null)?"":s); return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); };
     const attrEsc=function(s){ s=String((s===undefined||s===null)?"":s); return s.replace(/&/g,"&amp;").replace(/"/g,"&quot;"); };
@@ -540,7 +771,7 @@ function framedExtent(geom){
     let webmap=new WebMap({portalItem:{id:"e58a1a64e2e747cbb667ffd0b4e01b33",portal:portal}});
     const selLayer=new GraphicsLayer({listMode:"hide"}); webmap.add(selLayer);
     // Use provided center/scale
-    const view=new MapView({container:"viewDiv",map:webmap,center:LOGAN,scale:START_SCALE,constraints:{snapToZoom:false}});
+    const view=new MapView({container:"viewDiv",map:webmap,center:LOGAN,zoom:17,constraints:{snapToZoom:false}});
 
     const inText=function(t,p){ return String(t||"")+" "+String(p||""); };
     const isDNT=function(title,id,tags){
@@ -1603,6 +1834,12 @@ view.ui.add(new Home({view:view}),"top-left");
       const openBtn=$("openReportBtn");
       if(openBtn){
         openBtn.addEventListener("click", ()=>{
+          if(!isAccessActive()){
+            setGateMessage("Session expired", "Your access window has ended. Please purchase again to open a report.");
+            setGateVisible(true);
+            setTimerVisible(false);
+            return;
+          }
           if(!lastReportHTML){ alert("Report not ready yet."); return; }
           const w=window.open("about:blank","_blank");
           if(!w){ alert("Please allow pop-ups to view the report."); return; }
@@ -1611,6 +1848,7 @@ view.ui.add(new Home({view:view}),"top-left");
           w.document.close();
           try{ w.document.title = lastReportTitle; }catch{}
           document.getElementById("rptOverlay").style.display="none";
+          finalizeTokenAndLock();
         });
       }
     })();

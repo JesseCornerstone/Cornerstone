@@ -247,6 +247,50 @@
 
   .rptDone{border-color:#cfe6d2;background:#f2faf3;color:#1e7a31;font-weight:600}
 
+  /* Payment access gate */
+  #accessGate{
+    position:fixed;
+    inset:0;
+    display:none;
+    z-index:10000;
+    background:rgba(12,14,18,.78);
+    backdrop-filter:blur(3px);
+    color:#f6f7fb;
+    place-items:center;
+    padding:24px;
+  }
+  #accessGate.active{display:grid;}
+  .gate-card{
+    width:min(560px,92vw);
+    background:#14161b;
+    border:1px solid #2b2f38;
+    border-radius:18px;
+    padding:22px 24px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .gate-title{margin:0 0 8px;font-size:20px;letter-spacing:.2px}
+  .gate-msg{margin:0 0 14px;color:#c8cbd6;font-size:14px}
+  .gate-timer{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:#c03b41;background:#1b1d24;border:1px solid #2f333d;border-radius:999px;padding:6px 10px;margin-bottom:14px}
+  .gate-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .gate-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:none;
+    border-radius:999px;
+    padding:10px 16px;
+    background:#c03b41;
+    color:#fff;
+    cursor:pointer;
+    text-decoration:none;
+    font-weight:600;
+  }
+  .gate-btn.secondary{
+    background:transparent;
+    border:1px solid #3a3f4c;
+    color:#e3e6ef;
+  }
+
 
 
   /* Scrollable overlay summary list */
@@ -424,6 +468,20 @@
 
     <span id="statusScale">Scale: --</span>
 
+  </div>
+
+  <div id="accessGate" aria-hidden="true">
+    <div class="gate-card" role="dialog" aria-modal="true">
+      <h2 id="accessGateTitle" class="gate-title">Access required</h2>
+      <p id="accessGateMsg" class="gate-msg">A valid purchase is required to use this map.</p>
+      <div id="accessGateTimer" class="gate-timer" hidden>
+        Time remaining: <span id="accessCountdown">--:--</span>
+      </div>
+      <div class="gate-actions">
+        <a id="accessPayLink" class="gate-btn" href="#" rel="noopener">Go to payment</a>
+        <button id="accessGateHome" class="gate-btn secondary" type="button">Back to home</button>
+      </div>
+    </div>
   </div>
 
 
@@ -689,6 +747,181 @@
       }
 
     };
+
+    /* ---------------- Access gate ---------------- */
+    const accessState = {
+      key: null,
+      expiresAt: null,
+      active: false,
+      paymentUrl: null,
+      countdownTimer: null
+    };
+
+    const PAYMENT_FALLBACK_URL = "Index.html";
+    const buildFallbackPaymentUrl = ()=>{
+      const page = (window.location.pathname.split("/").pop() || "BCC.html").trim() || "BCC.html";
+      return `/api/stripe/checkout?return=${encodeURIComponent(page)}`;
+    };
+
+    const getQueryParam = name=>{
+      try{
+        return new URLSearchParams(window.location.search).get(name);
+      }catch{
+        return null;
+      }
+    };
+
+    const formatRemaining = ms=>{
+      if(ms < 0) ms = 0;
+      const total = Math.floor(ms / 1000);
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      return h > 0
+        ? `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`
+        : `${m}:${String(s).padStart(2,"0")}`;
+    };
+
+    const setGateVisible = on=>{
+      const gate = $("accessGate");
+      if(!gate) return;
+      gate.classList.toggle("active", !!on);
+      gate.setAttribute("aria-hidden", on ? "false" : "true");
+    };
+
+    const setGateMessage = (title, msg)=>{
+      setText("accessGateTitle", title);
+      setText("accessGateMsg", msg);
+    };
+
+    const setPaymentLink = url=>{
+      const link = $("accessPayLink");
+      if(link) link.href = url || PAYMENT_FALLBACK_URL;
+    };
+
+    const setTimerVisible = show=>{
+      const timer = $("accessGateTimer");
+      if(timer) timer.hidden = !show;
+    };
+
+    const redirectToPayment = ()=>{
+      const url = accessState.paymentUrl || PAYMENT_FALLBACK_URL;
+      window.location.href = url;
+    };
+
+    const loadPaymentUrl = async()=>{
+      try{
+        const res = await fetch("/api/payment-config", { cache: "no-store" });
+        if(res.ok){
+          const json = await res.json();
+          if(json && json.paymentUrl) return json.paymentUrl;
+        }
+      }catch{}
+      return null;
+    };
+
+    const checkToken = async key=>{
+      try{
+        const res = await fetch(`/api/check-token?key=${encodeURIComponent(key)}`, { cache: "no-store" });
+        if(res.ok){
+          const json = await res.json();
+          return { ok: true, expiresAt: json.expiresAt };
+        }
+        const text = await res.text();
+        let msg = "Access denied.";
+        try{
+          const parsed = JSON.parse(text);
+          if(parsed && parsed.error) msg = parsed.error;
+        }catch{}
+        return { ok: false, error: msg };
+      }catch{
+        return { ok: false, error: "Access check failed." };
+      }
+    };
+
+    const startCountdown = expiresAt=>{
+      const expiry = new Date(expiresAt);
+      const tick = ()=>{
+        const ms = expiry - new Date();
+        if(ms <= 0){
+          stopCountdown();
+          handleExpiry();
+          return;
+        }
+        const el = $("accessCountdown");
+        if(el) el.textContent = formatRemaining(ms);
+      };
+      tick();
+      accessState.countdownTimer = setInterval(tick, 1000);
+      setTimerVisible(true);
+    };
+
+    const stopCountdown = ()=>{
+      if(accessState.countdownTimer){
+        clearInterval(accessState.countdownTimer);
+        accessState.countdownTimer = null;
+      }
+    };
+
+    const handleExpiry = ()=>{
+      accessState.active = false;
+      setGateMessage("Session expired", "Your 24-hour access window has ended. Please purchase again to continue.");
+      setGateVisible(true);
+      setTimerVisible(false);
+      setTimeout(redirectToPayment, 1200);
+    };
+
+    const initAccessGate = async()=>{
+      accessState.key = getQueryParam("key");
+      accessState.paymentUrl = await loadPaymentUrl();
+      if(!accessState.paymentUrl){
+        accessState.paymentUrl = buildFallbackPaymentUrl();
+      }
+      setPaymentLink(accessState.paymentUrl || PAYMENT_FALLBACK_URL);
+
+      const homeBtn = $("accessGateHome");
+      if(homeBtn){
+        homeBtn.addEventListener("click", ()=>{ window.location.href = "Index.html"; });
+      }
+
+      if(!accessState.key){
+        setGateMessage("Payment required", "A valid purchase is required to use this map.");
+        setGateVisible(true);
+        setTimerVisible(false);
+        return;
+      }
+
+      const result = await checkToken(accessState.key);
+      if(!result.ok){
+        setGateMessage("Access denied", result.error || "This access link is invalid or expired.");
+        setGateVisible(true);
+        setTimerVisible(false);
+        return;
+      }
+
+      accessState.active = true;
+      accessState.expiresAt = result.expiresAt;
+      setGateVisible(false);
+      startCountdown(result.expiresAt);
+    };
+
+    const isAccessActive = ()=>{
+      if(!accessState.active || !accessState.expiresAt) return false;
+      return new Date(accessState.expiresAt) > new Date();
+    };
+
+    const finalizeTokenAndExit = async()=>{
+      if(!accessState.key){
+        redirectToPayment();
+        return;
+      }
+      try{
+        await fetch(`/api/finalise-token?key=${encodeURIComponent(accessState.key)}`, { method: "POST" });
+      }catch{}
+      redirectToPayment();
+    };
+
+    initAccessGate();
 
     const slug=s=>String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const CITY_PLAN_BASE="https://cityplan.brisbane.qld.gov.au/eplan/#/";
@@ -2426,6 +2659,12 @@
       try{
 
         showLoading(true);
+        lastReportHTML = null;
+        lastReportTitle = "Property Report";
+        lastReportHTML = null;
+        lastReportTitle = "Property Report";
+        const actions = $("rptActions");
+        if(actions) actions.style.display = "none";
 
         const parcel=await findParcelAtPoint(ev.mapPoint);
 
@@ -3378,14 +3617,30 @@
 
 
 
+    let lastReportHTML=null, lastReportTitle="Property Report";
+
     /* ---------------- Build report ---------------- */
 
     $("btnPrintReport").addEventListener("click", async ()=>{
-
+      const actions=$("rptActions");
+      if(actions) actions.style.display="none";
       $("rptOverlay").style.display="grid";
-
-      try{ await buildAndOpenReport(); } finally { $("rptOverlay").style.display="none"; }
-
+      try{
+        const result = await buildAndOpenReport();
+        if(result && result.html){
+          lastReportHTML = result.html;
+          lastReportTitle = result.title || "Property Report";
+          setRpt("Report ready. Choose an option below.", 100, "rptS4");
+          const msg=$("rptReadyMsg"); if(msg) msg.textContent="Report ready. Choose an option below.";
+          if(actions) actions.style.display="flex";
+        }else{
+          $("rptOverlay").style.display="none";
+        }
+      }catch(e){
+        console.error(e);
+        alert("Could not create report.");
+        $("rptOverlay").style.display="none";
+      }
     });
 
 
@@ -3920,15 +4175,10 @@ setRpt("Composing document…", 93);
 
 
 
-        const w=window.open("about:blank","_blank");
+        const htmlOut = html.join("");
+        return {html: htmlOut, title: docTitle || "Property Report"};
 
-        if(w){ w.document.open(); w.document.write(html.join("")); w.document.close(); try{ w.document.title = docTitle; }catch{} setTimeout(()=>{try{w.focus(); w.print();}catch{}},350); }
-
-
-
-        setRpt("Done", 100, "rptS4");
-
-      }catch(e){ console.error(e); alert("Could not create report."); }
+      }catch(e){ console.error(e); alert("Could not create report."); return null; }
 
       finally{
 
@@ -3953,6 +4203,12 @@ setRpt("Composing document…", 93);
       if(openBtn){
 
         openBtn.addEventListener("click", ()=>{
+          if(!isAccessActive()){
+            setGateMessage("Session expired", "Your access window has ended. Please purchase again to open a report.");
+            setGateVisible(true);
+            setTimerVisible(false);
+            return;
+          }
 
           if(!lastReportHTML){ alert("Report not ready yet."); return; }
 
@@ -3969,6 +4225,8 @@ setRpt("Composing document…", 93);
           try{ w.document.title = lastReportTitle; }catch{}
 
           document.getElementById("rptOverlay").style.display="none";
+
+          finalizeTokenAndExit();
 
         });
 

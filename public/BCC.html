@@ -758,10 +758,6 @@
     };
 
     const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/3cIfZhgqOeZb95F9At7ss00";
-    const buildFallbackPaymentUrl = ()=>{
-      const page = (window.location.pathname.split("/").pop() || "BCC.html").trim() || "BCC.html";
-      return `/api/stripe/checkout?return=${encodeURIComponent(page)}`;
-    };
 
     const getQueryParam = name=>{
       try{
@@ -874,9 +870,6 @@
     const initAccessGate = async()=>{
       accessState.key = getQueryParam("key");
       accessState.paymentUrl = await loadPaymentUrl();
-      if(!accessState.paymentUrl){
-        accessState.paymentUrl = buildFallbackPaymentUrl();
-      }
       setPaymentLink(accessState.paymentUrl || PAYMENT_FALLBACK_URL);
 
       const homeBtn = $("accessGateHome");

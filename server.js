@@ -578,6 +578,9 @@ app.get('/api/payment-config', (req, res) => {
 app.get('/api/stripe/checkout', async (req, res) => {
   try {
     if (!stripe || !STRIPE_PRICE_ID) {
+      if (PAYMENT_URL) {
+        return res.redirect(303, PAYMENT_URL);
+      }
       return res
         .status(500)
         .send('Stripe is not configured. Missing STRIPE_SECRET_KEY or STRIPE_PRICE_ID.');

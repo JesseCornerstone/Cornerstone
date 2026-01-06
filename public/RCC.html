@@ -79,6 +79,49 @@
   .rptStep{background:#fbfbfc;border:1px dashed #e2e4e8;border-radius:10px;padding:10px;font-size:12px;color:#475467}
   .rptDone{border-color:#cfe6d2;background:#f2faf3;color:#1e7a31;font-weight:600}
 
+  /* Payment access gate */
+  #accessGate{
+    position:fixed;
+    inset:0;
+    display:none;
+    z-index:10000;
+    background:rgba(12,14,18,.78);
+    backdrop-filter:blur(3px);
+    color:#f6f7fb;
+    place-items:center;
+    padding:24px;
+  }
+  #accessGate.active{display:grid;}
+  .gate-card{
+    width:min(560px,92vw);
+    background:#14161b;
+    border:1px solid #2b2f38;
+    border-radius:18px;
+    padding:22px 24px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .gate-title{margin:0 0 8px;font-size:20px;letter-spacing:.2px}
+  .gate-msg{margin:0 0 14px;color:#c8cbd6;font-size:14px}
+  .gate-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .gate-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:none;
+    border-radius:999px;
+    padding:10px 16px;
+    background:#c03b41;
+    color:#fff;
+    cursor:pointer;
+    text-decoration:none;
+    font-weight:600;
+  }
+  .gate-btn.secondary{
+    background:transparent;
+    border:1px solid #3a3f4c;
+    color:#e3e6ef;
+  }
+
   /* Scrollable overlay summary list */
   #sumOverlays{
     max-height: 320px;
@@ -173,6 +216,17 @@
     <span id="statusScale">Scale: --</span>
   </div>
 
+  <div id="accessGate" aria-hidden="true">
+    <div class="gate-card" role="dialog" aria-modal="true">
+      <h2 id="accessGateTitle" class="gate-title">Access required</h2>
+      <p id="accessGateMsg" class="gate-msg">A valid purchase is required to use this map.</p>
+      <div class="gate-actions">
+        <a id="accessPayLink" class="gate-btn" href="#" rel="noopener">Go to payment</a>
+        <button id="accessGateHome" class="gate-btn secondary" type="button">Back to home</button>
+      </div>
+    </div>
+  </div>
+
   <div id="rptOverlay" aria-hidden="true">
     <div id="rptCard">
       <div id="rptBrand">
@@ -255,6 +309,127 @@
     const waitViewIdle=async(extra=240)=>{try{await reactiveUtils.whenOnce(()=>!view.updating);}catch{} await raf(); await sleep(extra);};
     const slug=s=>String(s||"overlay").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
     const htmlEsc=s=>String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+    /* ---------------- Access gate ---------------- */
+    const accessState = {
+      key: null,
+      expiresAt: null,
+      active: false,
+      paymentUrl: null
+    };
+
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/cNieVd8Ym04hdlV5kd7ss06";
+
+    const getQueryParam = name=>{
+      try{
+        return new URLSearchParams(window.location.search).get(name);
+      }catch{
+        return null;
+      }
+    };
+
+    const setGateVisible = on=>{
+      const gate = $("accessGate");
+      if(!gate) return;
+      gate.classList.toggle("active", !!on);
+      gate.setAttribute("aria-hidden", on ? "false" : "true");
+    };
+
+    const setGateMessage = (title, msg)=>{
+      setText("accessGateTitle", title);
+      setText("accessGateMsg", msg);
+    };
+
+    const setPaymentLink = url=>{
+      const link = $("accessPayLink");
+      if(link) link.href = url || PAYMENT_FALLBACK_URL;
+    };
+
+    const loadPaymentUrl = async()=>{
+      try{
+        const res = await fetch("/api/payment-config", { cache: "no-store" });
+        if(res.ok){
+          const json = await res.json();
+          if(json && json.paymentUrl) return json.paymentUrl;
+        }
+      }catch{}
+      return null;
+    };
+
+    const checkToken = async key=>{
+      try{
+        const res = await fetch(`/api/check-token?key=${encodeURIComponent(key)}`, { cache: "no-store" });
+        if(res.ok){
+          const json = await res.json();
+          return { ok: true, expiresAt: json.expiresAt };
+        }
+        const text = await res.text();
+        let msg = "Access denied.";
+        try{
+          const parsed = JSON.parse(text);
+          if(parsed && parsed.error) msg = parsed.error;
+        }catch{}
+        return { ok: false, error: msg };
+      }catch{
+        return { ok: false, error: "Access check failed." };
+      }
+    };
+
+    const initAccessGate = async()=>{
+      accessState.key = getQueryParam("key");
+      const sessionId = getQueryParam("session_id");
+      accessState.paymentUrl = await loadPaymentUrl();
+      setPaymentLink(accessState.paymentUrl || PAYMENT_FALLBACK_URL);
+
+      const homeBtn = $("accessGateHome");
+      if(homeBtn){
+        homeBtn.addEventListener("click", ()=>{ window.location.href = "Index.html"; });
+      }
+
+      if(!accessState.key && sessionId){
+        const returnPath = "RCC.html";
+        window.location.href = `/api/stripe/success?session_id=${encodeURIComponent(sessionId)}&return=${encodeURIComponent(returnPath)}`;
+        return;
+      }
+
+      if(!accessState.key){
+        setGateMessage("Payment required", "A valid purchase is required to use this map.");
+        setGateVisible(true);
+        return;
+      }
+
+      const result = await checkToken(accessState.key);
+      if(!result.ok){
+        setGateMessage("Access denied", result.error || "This access link is invalid or expired.");
+        setGateVisible(true);
+        return;
+      }
+
+      accessState.active = true;
+      accessState.expiresAt = result.expiresAt;
+      setGateVisible(false);
+    };
+
+    const isAccessActive = ()=>{
+      if(!accessState.active || !accessState.expiresAt) return false;
+      return new Date(accessState.expiresAt) > new Date();
+    };
+
+    const finalizeTokenAndLock = async()=>{
+      if(!accessState.key){
+        setGateMessage("Payment required", "A valid purchase is required to use this map.");
+        setGateVisible(true);
+        return;
+      }
+      try{
+        await fetch(`/api/finalise-token?key=${encodeURIComponent(accessState.key)}`, { method: "POST" });
+      }catch{}
+      accessState.active = false;
+      setGateMessage("Payment required", "Access used. Please purchase again to continue.");
+      setGateVisible(true);
+    };
+
+    initAccessGate();
 
     function framedExtent(geom){
       try{
@@ -1050,16 +1225,35 @@ view.ui.add(new Home({view}),"top-left");
       }
     }
 
+    let lastReportHTML=null, lastReportTitle="Property Report";
+
     /* ---------------- Build report ---------------- */
     $("btnPrintReport").addEventListener("click", async ()=>{
+      const actions=$("rptActions");
+      if(actions) actions.style.display="none";
       $("rptOverlay").style.display="grid";
-      try{ await buildAndOpenReport(); } finally { $("rptOverlay").style.display="none"; }
+      try{
+        const result = await buildAndOpenReport();
+        if(result && result.html){
+          lastReportHTML = result.html;
+          lastReportTitle = result.title || "Property Report";
+          setRpt("Report ready. Choose an option below.", 100, "rptS4");
+          const msg=$("rptReadyMsg"); if(msg) msg.textContent="Report ready. Choose an option below.";
+          if(actions) actions.style.display="flex";
+        }else{
+          $("rptOverlay").style.display="none";
+        }
+      }catch(e){
+        console.error(e);
+        alert("Could not create report.");
+        $("rptOverlay").style.display="none";
+      }
     });
 
     async function buildAndOpenReport(){
       try{
         showLoading(true);
-        setRpt("Locating parcel…", 12);
+        setRpt("Locating parcel...", 12);
         let geom=null, lotText="--", areaText="-- "+M2, classText="--", addressText="--", councilText="Redland City Council";
         if(lastParcelInfo.feature){
           geom=lastParcelInfo.feature.geometry; ({lotText,areaText,classText,addressText,councilText}=lastParcelInfo);
@@ -1070,18 +1264,18 @@ view.ui.add(new Home({view}),"top-left");
         setRpt("Parcel located", 18, "rptS1");
 
         if(geom){
-          setRpt("Resolving address…", 25);
+          setRpt("Resolving address...", 25);
           try{ addressText=await resolveBestAddress(geom,lastParcelInfo.feature); }catch{}
           setRpt("Address resolved", 35, "rptS2");
           lastParcelInfo.addressText = addressText || lastParcelInfo.addressText;
         }
 
-        setRpt("Rendering base map…", 42);
+        setRpt("Rendering base map...", 42);
         const baseShot = geom
           ? await withViewOnGeom(geom, async()=>{ try{selLayer.visible=true;}catch{}; await waitViewIdle(200); return await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height}); })
           : await view.takeScreenshot({format:"png",quality:95,width:SHOT_SIZE.width,height:SHOT_SIZE.height});
 
-        setRpt("Collecting overlays…", 55);
+        setRpt("Collecting overlays...", 55);
         const cats = geom ? await (async()=>{
           const out={zoning:[],utilities:[],acid:[],transport:[],air:[],noise:[],bushfire:[],others:[]};
           const arr=[]; walkAny(view.map,(n,underDNT)=>{ if(n && (n.type==="feature"||n.type==="sublayer") && (typeof n.queryFeatures==="function" || typeof n.queryFeatureCount==="function") && !underDNT) arr.push(n); });
@@ -1112,55 +1306,69 @@ view.ui.add(new Home({view}),"top-left");
           ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
           ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
           ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",collectAllNoiseDisplayNodes,geom,baseShot,"No noise Lv"); }],
-          ["Other overlays", async()=>{
-            for (const n of cats.others) {
-              const s = await screenshotFor([n], n.title || "Overlay", geom);
-              if (s) shots.push(s);
-            }
-          }]
+          ["Other overlays", async()=>{ for (const n of cats.others) { const s = await screenshotFor([n], n.title || "Overlay", geom); if (s) shots.push(s); } }]
         ];
         for(let i=0;i<tasks.length;i++){
           const [name,fn]=tasks[i];
-          setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
+          setRpt(`Rendering ${name}...`, 55 + Math.round(((i+1)/tasks.length)*30));
           await fn();
         }
         dedupeShotsByTitle(shots,"Transport Noise Corridor");
         setRpt("Overlays rendered", 87, "rptS3");
 
-        setRpt("Composing document…", 93);
+        setRpt("Composing document...", 93);
         const now=new Date();
         const fmt=d=> d.toLocaleString(undefined,{year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
         const esc=htmlEsc;
         const logoSrc="./images/Flavour icon.png";
 
+        const toFileSafe = s =>
+          String(s)
+            .replace(/[<>:"/\|?*\x00-\x1F]/g, "")
+            .replace(/\s+/g, " ")
+            .trim();
+        const baseName = (addressText && addressText !== "--")
+          ? addressText
+          : ((lotText && lotText !== "--") ? ("Lot " + lotText) : "Property");
+        const reportDisplayTitle = baseName + " - Property Report";
+        const reportFileTitle = toFileSafe(reportDisplayTitle);
+
         const html=[];
-        html.push("<!doctype html><meta charset='utf-8'><title>Preliminary Report — Redland Interactive Mapping</title>");
+        html.push("<!doctype html><meta charset='utf-8'><title>",esc(reportFileTitle),"</title>");
         html.push("<style>",
-          "body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px;color:#222;background:#f6f7f9}",
-          ".card{border:1px solid #e1e3e6;border-radius:12px;padding:14px;margin:10px 0;background:#fff;box-shadow:0 2px 10px rgba(16,21,28,.05)}",
-          ".brandbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:-14px -14px 14px -14px;color:#fff;background:linear-gradient(90deg,#a70b13,#7f0e15);border-radius:12px 12px 0 0}",
+          ":root{--brand:#a70b13;--brand2:#7f0e15;--bg:#f6f7f9;--ink:#0b0d12;--border:#e1e3e6;--radius:14px;--shadow:0 6px 18px rgba(16,21,28,.08);--panel:#ffffff;--panel-2:#f8f9fb;--muted:#5b6470}",
+          "body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:18px;color:var(--ink);background:var(--bg);line-height:1.4}",
+          "a{color:var(--brand2)}",
+          ".card{border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin:10px 0;background:var(--panel);box-shadow:var(--shadow)}",
+          ".brandbar{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:-14px -14px 14px -14px;color:#fff;background:linear-gradient(90deg,var(--brand),var(--brand2));border-radius:var(--radius) var(--radius) 0 0;box-shadow:var(--shadow)}",
           ".brandbar img{width:28px;height:28px;border:1px solid #ddd;background:#fff;border-radius:6px}",
           ".brandbar h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}",
           ".brandbar .muted{margin-left:auto;opacity:.95;font-weight:600}",
-          ".rpt-grid{display:grid;grid-template-columns:1fr 1.25fr;gap:18px}",
+          ".rpt-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:16px}",
           ".propmap{grid-column:1 / -1}",
-          ".propmap-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:16px;align-items:start}",
-          ".badge-pill{display:inline-block;border:1px solid #dadde2;border-radius:999px;padding:4px 10px;margin:4px 6px 0 0;background:#fafbfc}",
-          ".kv{margin-top:8px;font-size:14px;color:#333}.kv div{margin:4px 0}",
-          "img.map{max-width:100%;border:1px solid #e6e8ec;border-radius:10px}",
-          ".section-title{margin:0 0 10px;font-size:18px}",
-          ".overlay-header{display:flex;align-items:center;justify-content:space-between;gap:8px}",
-          ".backbtn{display:inline-block;border:1px solid #d7d7d7;border-radius:999px;padding:6px 10px;font-size:12px;color:#333;text-decoration:none;background:#f7f7f7}.backbtn:hover{background:#eee}",
+          ".propmap-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:16px;align-items:start}",
+          ".badge-pill{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:3px 9px;margin:3px 6px 0 0;background:#fff;font-size:11px;font-weight:600;color:var(--ink)}",
+          ".kv{margin-top:8px;font-size:14px;color:var(--ink)}.kv div{margin:4px 0}",
+          "img.map{display:block;width:auto;max-width:100%;height:auto;border:1px solid #e6e8ec;border-radius:12px;box-shadow:0 6px 14px rgba(16,21,28,.08);background:#fff;margin:0}",
+          ".section-title{margin:0 0 8px;font-size:16px;letter-spacing:.2px;color:var(--brand2)}",
+          ".section-title:after{content:\"\";display:block;width:36px;height:3px;margin-top:6px;border-radius:999px;background:linear-gradient(90deg,var(--brand),var(--brand2))}",
+          ".overlay-header{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-bottom:8px;margin-bottom:10px;border-bottom:1px solid #edf0f3}",
+          ".overlay-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-start}",
+          ".backbtn{display:inline-flex;align-items:center;gap:6px;border:1px solid rgba(167,11,19,.22);border-radius:999px;padding:5px 12px;font-size:11px;font-weight:700;color:var(--brand2);text-decoration:none;background:#fff;box-shadow:0 1px 0 rgba(16,21,28,.05)}.backbtn:hover{background:#fff0f1;border-color:var(--brand)}",
           ".sumlist{margin:6px 0 0 18px;padding:0}.sumlist li{margin:8px 0 12px}",
-          ".note{margin-top:8px;font-size:13px;color:#7a0f16;font-weight:700}",
-          ".leg{font-size:13px;line-height:1.35;margin-top:8px}.leg .row{display:flex;align-items:center;gap:8px;margin:2px 0}",
-          ".leg .swbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;padding:1px;border:1px solid #999;border-radius:3px;overflow:hidden;background:#fff}",
+          ".sumlist li::marker{color:var(--brand2)}",
+          ".note{margin-top:8px;font-size:13px;color:var(--brand);font-weight:700;background:#fff4f4;border:1px solid #f3c7c7;border-radius:10px;padding:6px 10px;display:inline-block}",
+          ".leg{font-size:13px;line-height:1.4;margin-top:8px}.leg .row{display:flex;align-items:center;gap:8px;margin:2px 0}",
+          ".leg .swbox{display:inline-flex;align-items:center;justify-content:center;width:16px;height:14px;padding:1px;border:1px solid #9aa0a6;border-radius:4px;overflow:hidden;background:#fff}",
           ".leg .swbox img,.leg .swbox svg,.leg .swbox canvas{width:100%;height:100%;display:block;object-fit:contain}",
-          ".rpt-footer{margin-top:14px;padding-top:8px;border-top:1px dashed #ddd;font-size:12px;color:#555}",
+          ".map-legend{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:14px;align-items:start}",
+          ".map-legend .leg{margin-top:0;background:var(--panel-2);border:1px solid rgba(167,11,19,.18);border-radius:10px;padding:10px}",
+          "@media (max-width: 900px){.map-legend{grid-template-columns:1fr}}",
+          ".rpt-footer{margin-top:14px;padding-top:8px;border-top:1px dashed var(--border);font-size:12px;color:var(--muted)}",
           "@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.card{page-break-inside:avoid}}",
           "</style>");
         html.push("<body>");
-        html.push("<div class='card brandbar'><img src='",logoSrc,"' alt='Logo'><h1>",esc((addressText && addressText!=="--") ? addressText : "Redland Interactive Mapping — Preliminary Report"),"</h1><div class='muted'>",fmt(now),"</div></div>");
+        html.push("<div class='card brandbar'><img src='",logoSrc,"' alt='Logo'><h1>",esc(reportDisplayTitle),"</h1><div class='muted'>",fmt(now),"</div></div>");
 
         html.push("<div class='rpt-grid'>");
           html.push("<div class='card propmap'>",
@@ -1180,7 +1388,7 @@ view.ui.add(new Home({view}),"top-left");
                               html.push("<ul class='sumlist'>");
                               for(const s of shots){
                                 const ct=(s.count!=null)?(" ("+s.count+" feature"+(s.count===1?"":"s")+")"):"";
-                                html.push("<li><a class='sum-link' style='color:#7a0f16;font-weight:700;text-decoration:none' href='#",s.id,"'>",esc(s.title),"</a>",ct,(s.note?(" — "+esc(s.note)):""),"</li>");
+                                html.push("<li><a class='sum-link' style='color:#7a0f16;font-weight:700;text-decoration:none' href='#",s.id,"'>",esc(s.title),"</a>",ct,(s.note?(" - "+esc(s.note)):""),"</li>");
                               }
                               html.push("</ul>");
                             }else{
@@ -1190,25 +1398,30 @@ view.ui.add(new Home({view}),"top-left");
                         "</div>",
                         "<div><h2 class='section-title'>Map</h2><img class='map' src='",baseShot.dataUrl,"' alt='Map'></div>",
                       "</div>",
-                      "<div class='rpt-footer'>Generated by Redland Interactive Mapping. Confirm against the current planning scheme and authoritative datasets before relying on this report.</div>",
+                      "<div class='rpt-footer'>Generated by CornerstonePlus. Confirm against the current planning scheme and authoritative datasets before relying on this report.</div>",
                     "</div>");
         html.push("</div>");
 
         for(const s of shots){
           html.push("<div class='card' id='",s.id,"'>",
-            "<div class='overlay-header'><h2 class='section-title' style='margin:0'>",esc(s.title),"</h2><a class='backbtn' href='#summary'>Back to Summary ↑</a></div>",
-            "<img class='map' src='",s.dataUrl,"' alt='",esc(s.title),"'>",
-            (s.note ? "<div class='note'>"+esc(s.note)+"</div>" : ""),
-            "<div class='leg'>", (s.legendHTML || ""), "</div>",
+            "<div class='overlay-header'>",
+              "<h2 class='section-title' style='margin:0'>",esc(s.title),"</h2>",
+              "<div class='overlay-actions'>",
+                "<a class='backbtn' href='#summary'>Back to Summary</a>",
+              "</div>",
+            "</div>",
+            "<div class='map-legend'>",
+              "<div><img class='map' src='",s.dataUrl,"' alt='",esc(s.title),"'></div>",
+              "<div class='leg'>", (s.note ? "<div class='note'>"+esc(s.note)+"</div>" : ""), (s.legendHTML || ""), "</div>",
+            "</div>",
           "</div>");
         }
 
-        html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/>© Redland City Council — Redland Interactive Mapping. Indicative only.</div>");
+        html.push("<div class='card rpt-footer'><img src='",logoSrc,"' alt='Logo' style='width:18px;height:18px;vertical-align:-3px;border-radius:3px;border:1px solid #ddd;background:#fff;margin-right:6px'/> Redland City Council - CornerstonePlus. Indicative only.</div>");
         html.push("</body>");
 
-        const w=window.open("about:blank","_blank");
-        if(w){ w.document.open(); w.document.write(html.join("")); w.document.close(); setTimeout(()=>{try{w.focus(); w.print();}catch{}},350); }
-        setRpt("Done", 100, "rptS4");
+        const htmlOut = html.join("");
+        return {html: htmlOut, title: reportFileTitle};
       }catch(e){ console.error(e); alert("Could not create report."); }
       finally{ showLoading(false); }
     }
@@ -1217,6 +1430,11 @@ view.ui.add(new Home({view}),"top-left");
       const openBtn=$("openReportBtn");
       if(openBtn){
         openBtn.addEventListener("click", ()=>{
+          if(!isAccessActive()){
+            setGateMessage("Session expired", "Your access window has ended. Please purchase again to open a report.");
+            setGateVisible(true);
+            return;
+          }
           if(!lastReportHTML){ alert("Report not ready yet."); return; }
           const w=window.open("about:blank","_blank");
           if(!w){ alert("Please allow pop-ups to view the report."); return; }
@@ -1225,11 +1443,10 @@ view.ui.add(new Home({view}),"top-left");
           w.document.close();
           try{ w.document.title = lastReportTitle; }catch{}
           document.getElementById("rptOverlay").style.display="none";
+          finalizeTokenAndLock();
         });
       }
     })();
-
-
     /* ---------------- Tabs & Home ---------------- */
     ;[["summary"],["setbacks"],["proposal"],["yield"]].forEach(([name])=>{
       const t=$("tab-"+name), p=$("panel-"+name);

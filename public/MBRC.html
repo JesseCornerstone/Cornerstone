@@ -306,9 +306,6 @@
     <div class="gate-card" role="dialog" aria-modal="true">
       <h2 id="accessGateTitle" class="gate-title">Access required</h2>
       <p id="accessGateMsg" class="gate-msg">A valid purchase is required to use this map.</p>
-      <div id="accessGateTimer" class="gate-timer" hidden>
-        Time remaining: <span id="accessCountdown">--:--</span>
-      </div>
       <div class="gate-actions">
         <a id="accessPayLink" class="gate-btn" href="#" rel="noopener">Go to payment</a>
         <button id="accessGateHome" class="gate-btn secondary" type="button">Back to home</button>
@@ -524,12 +521,19 @@
 
     const initAccessGate = async()=>{
       accessState.key = getQueryParam("key");
+      const sessionId = getQueryParam("session_id");
       accessState.paymentUrl = await loadPaymentUrl();
       setPaymentLink(accessState.paymentUrl || PAYMENT_FALLBACK_URL);
 
       const homeBtn = $("accessGateHome");
       if(homeBtn){
         homeBtn.addEventListener("click", ()=>{ window.location.href = "Index.html"; });
+      }
+
+      if(!accessState.key && sessionId){
+        const returnPath = "MBRC.html";
+        window.location.href = `/api/stripe/success?session_id=${encodeURIComponent(sessionId)}&return=${encodeURIComponent(returnPath)}`;
+        return;
       }
 
       if(!accessState.key){

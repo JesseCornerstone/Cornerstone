@@ -107,6 +107,53 @@ function generateToken(byteLength = 32) {
     .replace(/=+$/g, '');
 }
 
+const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const tokenStore = new Map();
+
+function createInMemoryToken(email, paymentId) {
+  const token = generateToken(32);
+  const now = Date.now();
+  const expiresAt = now + TOKEN_TTL_MS;
+  tokenStore.set(token, {
+    token,
+    email: email || null,
+    paymentId: paymentId || null,
+    createdAt: now,
+    expiresAt,
+    used: false,
+    usedAt: null
+  });
+  return { token, expiresAt };
+}
+
+function getTokenRecord(token) {
+  if (!token) return null;
+  const rec = tokenStore.get(token);
+  if (!rec) return null;
+  if (rec.expiresAt <= Date.now()) {
+    tokenStore.delete(token);
+    return { expired: true };
+  }
+  return rec;
+}
+
+function markTokenUsed(token) {
+  const rec = getTokenRecord(token);
+  if (!rec || rec.expired) return null;
+  if (rec.used) return rec;
+  rec.used = true;
+  rec.usedAt = Date.now();
+  tokenStore.set(token, rec);
+  return rec;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, rec] of tokenStore.entries()) {
+    if (rec.expiresAt <= now) tokenStore.delete(key);
+  }
+}, 15 * 60 * 1000);
+
 function getBaseUrl(req) {
   if (APP_BASE_URL) return APP_BASE_URL.replace(/\/+$/, '');
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
@@ -438,24 +485,7 @@ app.post('/api/create-token', async (req, res) => {
       return res.status(400).send('Missing email or orderId.');
     }
 
-    const pool = await getPool();
-    if (!pool) {
-      return res.status(500).send('DB connection failed.');
-    }
-
-    const token = generateToken(32);
-
-    const insertSql = `
-      INSERT INTO dbo.ReportAccessTokens (Token, UserEmail, PaymentId, ExpiresAt)
-      VALUES (@Token, @UserEmail, @PaymentId, DATEADD(HOUR, 24, SYSUTCDATETIME()));
-    `;
-
-    await pool
-      .request()
-      .input('Token', sql.NVarChar(128), token)
-      .input('UserEmail', sql.NVarChar(320), email)
-      .input('PaymentId', sql.NVarChar(100), orderId)
-      .query(insertSql);
+    const { token } = createInMemoryToken(email, orderId);
 
     const sep = REPORT_BASE_URL.includes('?') ? '&' : '?';
     const reportUrl = `${REPORT_BASE_URL}${sep}key=${token}`;
@@ -477,45 +507,20 @@ app.get('/api/check-token', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Missing key.' });
     }
 
-    const pool = await getPool();
-    if (!pool) {
-      return res
-        .status(500)
-        .json({ ok: false, error: 'DB connection failed' });
-    }
-
-    const result = await pool
-      .request()
-      .input('Token', sql.NVarChar(128), key)
-      .query(
-        `
-        SELECT TOP 1 Token, ExpiresAt, Used
-        FROM dbo.ReportAccessTokens
-        WHERE Token = @Token
-      `
-      );
-
-    if (!result.recordset.length) {
+    const rec = getTokenRecord(key);
+    if (!rec) {
       return res.status(404).json({ ok: false, error: 'Invalid token.' });
     }
-
-    const row = result.recordset[0];
-    if (row.Used) {
-      return res.status(409).json({ ok: false, error: 'Token already used.' });
-    }
-
-    const expiresAt = new Date(row.ExpiresAt);
-    if (Number.isNaN(expiresAt.getTime())) {
-      return res.status(500).json({ ok: false, error: 'Invalid expiry.' });
-    }
-
-    if (expiresAt <= new Date()) {
+    if (rec.expired) {
       return res.status(410).json({ ok: false, error: 'Token expired.' });
+    }
+    if (rec.used) {
+      return res.status(409).json({ ok: false, error: 'Token already used.' });
     }
 
     return res.json({
       ok: true,
-      expiresAt: expiresAt.toISOString()
+      expiresAt: new Date(rec.expiresAt).toISOString()
     });
   } catch (err) {
     console.error('Error in /api/check-token:', err);
@@ -534,26 +539,8 @@ app.post('/api/finalise-token', async (req, res) => {
       return res.status(400).send('Missing key.');
     }
 
-    const pool = await getPool();
-    if (!pool) {
-      return res.status(500).send('DB connection failed.');
-    }
-
-    const updateSql = `
-      UPDATE dbo.ReportAccessTokens
-      SET Used = 1,
-          UsedAt = SYSUTCDATETIME()
-      WHERE Token = @Token
-        AND Used = 0
-        AND ExpiresAt > SYSUTCDATETIME();
-    `;
-
-    const result = await pool
-      .request()
-      .input('Token', sql.NVarChar(128), key)
-      .query(updateSql);
-
-    if (!result.rowsAffected || result.rowsAffected[0] === 0) {
+    const rec = markTokenUsed(key);
+    if (!rec || rec.expired || rec.used) {
       return res
         .status(400)
         .send('This report link is invalid, expired, or already used.');
@@ -631,26 +618,9 @@ app.get('/api/stripe/success', async (req, res) => {
       return res.redirect(303, `${baseUrl}/${returnPath}`);
     }
 
-    const pool = await getPool();
-    if (!pool) {
-      return res.status(500).send('DB connection failed.');
-    }
-
-    const token = generateToken(32);
     const email =
       session.customer_details?.email || session.customer_email || null;
-
-    const insertSql = `
-      INSERT INTO dbo.ReportAccessTokens (Token, UserEmail, PaymentId, ExpiresAt)
-      VALUES (@Token, @UserEmail, @PaymentId, DATEADD(HOUR, 24, SYSUTCDATETIME()));
-    `;
-
-    await pool
-      .request()
-      .input('Token', sql.NVarChar(128), token)
-      .input('UserEmail', sql.NVarChar(320), email)
-      .input('PaymentId', sql.NVarChar(100), session.id)
-      .query(insertSql);
+    const { token } = createInMemoryToken(email, session.id);
 
     const sep = returnPath.includes('?') ? '&' : '?';
     return res.redirect(303, `${baseUrl}/${returnPath}${sep}key=${token}`);

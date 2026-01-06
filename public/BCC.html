@@ -903,15 +903,21 @@
       return new Date(accessState.expiresAt) > new Date();
     };
 
-    const finalizeTokenAndExit = async()=>{
+    const finalizeTokenAndLock = async()=>{
       if(!accessState.key){
-        redirectToPayment();
+        setGateMessage("Payment required", "A valid purchase is required to use this map.");
+        setGateVisible(true);
+        setTimerVisible(false);
         return;
       }
       try{
         await fetch(`/api/finalise-token?key=${encodeURIComponent(accessState.key)}`, { method: "POST" });
       }catch{}
-      redirectToPayment();
+      stopCountdown();
+      accessState.active = false;
+      setGateMessage("Payment required", "Access used. Please purchase again to continue.");
+      setGateVisible(true);
+      setTimerVisible(false);
     };
 
     initAccessGate();
@@ -4219,7 +4225,7 @@ setRpt("Composing document…", 93);
 
           document.getElementById("rptOverlay").style.display="none";
 
-          finalizeTokenAndExit();
+          finalizeTokenAndLock();
 
         });
 

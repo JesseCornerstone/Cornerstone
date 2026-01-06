@@ -291,6 +291,50 @@
     color:#e3e6ef;
   }
 
+  /* Payment access gate */
+  #accessGate{
+    position:fixed;
+    inset:0;
+    display:none;
+    z-index:10000;
+    background:rgba(12,14,18,.78);
+    backdrop-filter:blur(3px);
+    color:#f6f7fb;
+    place-items:center;
+    padding:24px;
+  }
+  #accessGate.active{display:grid;}
+  .gate-card{
+    width:min(560px,92vw);
+    background:#14161b;
+    border:1px solid #2b2f38;
+    border-radius:18px;
+    padding:22px 24px;
+    box-shadow:0 24px 60px rgba(0,0,0,.5);
+  }
+  .gate-title{margin:0 0 8px;font-size:20px;letter-spacing:.2px}
+  .gate-msg{margin:0 0 14px;color:#c8cbd6;font-size:14px}
+  .gate-timer{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:#c03b41;background:#1b1d24;border:1px solid #2f333d;border-radius:999px;padding:6px 10px;margin-bottom:14px}
+  .gate-actions{display:flex;gap:10px;flex-wrap:wrap}
+  .gate-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border:none;
+    border-radius:999px;
+    padding:10px 16px;
+    background:#c03b41;
+    color:#fff;
+    cursor:pointer;
+    text-decoration:none;
+    font-weight:600;
+  }
+  .gate-btn.secondary{
+    background:transparent;
+    border:1px solid #3a3f4c;
+    color:#e3e6ef;
+  }
+
 
 
   /* Scrollable overlay summary list */
@@ -474,9 +518,6 @@
     <div class="gate-card" role="dialog" aria-modal="true">
       <h2 id="accessGateTitle" class="gate-title">Access required</h2>
       <p id="accessGateMsg" class="gate-msg">A valid purchase is required to use this map.</p>
-      <div id="accessGateTimer" class="gate-timer" hidden>
-        Time remaining: <span id="accessCountdown">--:--</span>
-      </div>
       <div class="gate-actions">
         <a id="accessPayLink" class="gate-btn" href="#" rel="noopener">Go to payment</a>
         <button id="accessGateHome" class="gate-btn secondary" type="button">Back to home</button>
@@ -800,11 +841,6 @@
       if(timer) timer.hidden = !show;
     };
 
-    const redirectToPayment = ()=>{
-      const url = accessState.paymentUrl || PAYMENT_FALLBACK_URL;
-      window.location.href = url;
-    };
-
     const loadPaymentUrl = async()=>{
       try{
         const res = await fetch("/api/payment-config", { cache: "no-store" });
@@ -864,7 +900,6 @@
       setGateMessage("Session expired", "Your 24-hour access window has ended. Please purchase again to continue.");
       setGateVisible(true);
       setTimerVisible(false);
-      setTimeout(redirectToPayment, 1200);
     };
 
     const initAccessGate = async()=>{

@@ -518,7 +518,7 @@
 
         <div style="margin-top:10px;color:#667085;font-size:12px">Report keeps running if you switch tabs; screenshots may just take a little longer.</div>
 
-              <div id="rptActions" style="margin-top:12px;display:none;gap:8px;align-items:center;">
+        <div id="rptActions" style="margin-top:12px;display:none;gap:8px;align-items:center;">
 
           <button id="openReportBtn" class="btn" type="button">Open Report</button>
 
@@ -757,7 +757,7 @@
       countdownTimer: null
     };
 
-    const PAYMENT_FALLBACK_URL = "Index.html";
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/3cIfZhgqOeZb95F9At7ss00";
     const buildFallbackPaymentUrl = ()=>{
       const page = (window.location.pathname.split("/").pop() || "BCC.html").trim() || "BCC.html";
       return `/api/stripe/checkout?return=${encodeURIComponent(page)}`;

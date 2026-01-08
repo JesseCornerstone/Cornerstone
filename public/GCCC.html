@@ -5,7 +5,40 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Gold Coast Interactive Mapping</title>
 <link rel="icon" type="image/png" href="./images/Flavour icon.png">
-<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css"/>
+
+<!-- ===== Non-intrusive performance hints (no functional changes) ===== -->
+<link rel="preconnect" href="https://js.arcgis.com" crossorigin>
+<link rel="dns-prefetch" href="//js.arcgis.com">
+<link rel="preconnect" href="https://geocode.arcgis.com" crossorigin>
+<link rel="dns-prefetch" href="//geocode.arcgis.com">
+<link rel="preconnect" href="https://cornerstonebc.maps.arcgis.com" crossorigin>
+<link rel="dns-prefetch" href="//cornerstonebc.maps.arcgis.com">
+<link rel="preconnect" href="https://services.arcgis.com" crossorigin>
+<link rel="dns-prefetch" href="//services.arcgis.com">
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+<link rel="preload" as="style" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css" crossorigin>
+<link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css" crossorigin>
+<link rel="preload" href="map-theme.css" as="style">
+
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/WebMap.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/Graphic.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/Expand.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/ScaleBar.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/Home.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/LayerList.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/Legend.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/BasemapGallery.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/widgets/Fullscreen.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js" crossorigin>
+<link rel="modulepreload" href="https://js.arcgis.com/4.30/@arcgis/core/config.js" crossorigin>
+<!-- ===== End performance hints ===== -->
 
 <style>
   :root{ --brand:#a70b13; --brand2:#7f0e15; --bg:#f6f7f9; --ink:#0b0d12; --border:#e1e3e6; --radius:14px; --shadow:0 6px 18px rgba(16,21,28,.08); }

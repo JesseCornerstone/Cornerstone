@@ -1609,8 +1609,7 @@ view.ui.add(new Home({view}),"top-left");
     }
     function parseLotPlan(text){
       if(!text) return null;
-      le
-      ts=String(text).toUpperCase();
+      let s=String(text).toUpperCase();
       s=s.replace(/[,]+/g," ").replace(/\bon\b/ig," ").replace(/\blot\b/ig," ").replace(/\s+/g," ").trim();
       let m = s.match(/^\s*(\d+)\s*\/\s*([A-Z]{1,4}\s*\d{1,8})\s*$/);
       if(m) return {lot:m[1], plan:normalizePlanText(m[2])};

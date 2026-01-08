@@ -828,7 +828,166 @@
     const isAir=(t,p="")=>/\b(air\s*quality|air-quality|air|pollution)\b/i.test(inText(t,p));
     const isNoise=(t,p="")=>/\b(noise|acoustic|transport.*noise.*corridor|tnc)\b/i.test(inText(t,p));
     const isZoning=(t,p="")=>/\b(zoning|zone|zones)\b/i.test(inText(t,p));
+    const isPrecinct=(t,p="")=>/\bprecincts?\b/i.test(inText(t,p));
     const isBushfire=(t,p="")=>/\b(bush[-\s]?fire|bushfire|bush\s*fire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p));
+    const planKey=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"");
+    const MBRC_PLANNING_LINKS=[
+      {key:planKey("General residential zone code"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/116/0/0/0/90"},
+      {key:planKey("General residential"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/116/0/0/0/90"},
+      {key:planKey("Rural residential zone code"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/0/0/90"},
+      {key:planKey("Rural residential"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/0/0/90"},
+      {key:planKey("Rural zone code"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/0/0/90"},
+      {key:planKey("Rural zone"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/0/0/90"},
+      {key:planKey("Rural"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/0/0/90"},
+      {key:planKey("Suburban neighbourhood precinct"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/0/0/90"},
+      {key:planKey("Suburban neighbourhood"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/0/0/90"},
+      {key:planKey("Coastal communities precinct"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/138/0/0/0/90"},
+      {key:planKey("Coastal communities"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/138/0/0/0/90"},
+      {key:planKey("Next generation neighbourhood precinct"),url:"http://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/0/0/90"},
+      {key:planKey("Next generation neighbourhood"),url:"http://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/0/0/90"},
+      {key:planKey("Urban neighbourhood precinct"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/0/0/90"},
+      {key:planKey("Urban neighbourhood"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/0/0/90"}
+    ];
+    const SUBURBAN_PRECINCT_KEY=planKey("Suburban neighbourhood precinct");
+    const SUBURBAN_NEIGHBOURHOOD_KEY=planKey("Suburban neighbourhood");
+    const NEXTGEN_PRECINCT_KEY=planKey("Next generation neighbourhood precinct");
+    const NEXTGEN_NEIGHBOURHOOD_KEY=planKey("Next generation neighbourhood");
+    const URBAN_PRECINCT_KEY=planKey("Urban neighbourhood precinct");
+    const URBAN_NEIGHBOURHOOD_KEY=planKey("Urban neighbourhood");
+    const RURAL_RESIDENTIAL_KEY=planKey("Rural residential");
+    const RURAL_ZONE_KEY=planKey("Rural zone code");
+    const RURAL_ZONE_NAME_KEY=planKey("Rural zone");
+    const RURAL_ONLY_KEY=planKey("Rural");
+    const SUBURBAN_PRECINCT_OVERLAY_LINKS=[
+      {key:planKey("environmental"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10590/0/90"},
+      {key:planKey("Heritage and landscape character"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10601/0/90"},
+      {key:planKey("Heritage"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10601/0/90"},
+      {key:planKey("Local heritage place"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10601/0/90"},
+      {key:planKey("Overland flow path"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10621/0/90"},
+      {key:planKey("Scenic amenity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10629/0/90"},
+      {key:planKey("Riparian and wetland setbacks"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/137/0/10627/0/90"}
+    ];
+    const NEXTGEN_PRECINCT_OVERLAY_LINKS=[
+      {key:planKey("environmental"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11448/0/90"},
+      {key:planKey("Heritage and landscape character"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11459/0/90"},
+      {key:planKey("Heritage"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11459/0/90"},
+      {key:planKey("Local heritage place"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11459/0/90"},
+      {key:planKey("Overland flow path"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11479/0/90"},
+      {key:planKey("Riparian and wetland setbacks"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11485/0/90"},
+      {key:planKey("Scenic amenity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/136/0/11487/0/90"}
+    ];
+    const URBAN_PRECINCT_OVERLAY_LINKS=[
+      {key:planKey("environmental"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12932/0/90"},
+      {key:planKey("Heritage and landscape character"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12939/0/90"},
+      {key:planKey("Heritage"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12939/0/90"},
+      {key:planKey("Local heritage place"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12939/0/90"},
+      {key:planKey("Overland flow path"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12956/0/90"},
+      {key:planKey("Riparian and wetland setbacks"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12962/0/90"},
+      {key:planKey("Scenic amenity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/135/0/12964/0/90"}
+    ];
+    const RURAL_RESIDENTIAL_OVERLAY_LINKS=[
+      {key:planKey("Bushfire hazard"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14849/0/90"},
+      {key:planKey("Bushfire"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14849/0/90"},
+      {key:planKey("High potential bushfire intensity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14849/0/90"},
+      {key:planKey("Potential impact buffer"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14849/0/90"},
+      {key:planKey("Environmental"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14855/0/90"},
+      {key:planKey("Heritage and landscape character"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14867/0/90"},
+      {key:planKey("Heritage"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14867/0/90"},
+      {key:planKey("Local heritage place"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14867/0/90"},
+      {key:planKey("Landslide"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14873/0/90"},
+      {key:planKey("Overland flow path"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14891/0/90"},
+      {key:planKey("Riparian and wetland setbacks"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14897/0/90"},
+      {key:planKey("Scenic amenity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/111/0/14899/0/90"}
+    ];
+    const RURAL_ZONE_OVERLAY_LINKS=[
+      {key:planKey("Bushfire"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14111/0/90"},
+      {key:planKey("Bushfire hazard"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14111/0/90"},
+      {key:planKey("High potential bushfire intensity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14111/0/90"},
+      {key:planKey("Potential impact buffer"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14111/0/90"},
+      {key:planKey("Environmental"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14117/0/90"},
+      {key:planKey("Heritage and landscape character"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14129/0/90"},
+      {key:planKey("Heritage"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14129/0/90"},
+      {key:planKey("Local heritage place"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14129/0/90"},
+      {key:planKey("Landslide hazard"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14135/0/90"},
+      {key:planKey("Landslide"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14135/0/90"},
+      {key:planKey("Overland flow path"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14153/0/90"},
+      {key:planKey("Riparian and wetland setbacks"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14159/0/90"},
+      {key:planKey("Scenic amenity"),url:"https://eplan.moretonbay.qld.gov.au/planningscheme/rules/0/112/0/14161/0/90"}
+    ];
+    const buildPlanningSchemeLink=(title,{zoneLabel}={})=>{
+      const term=String(zoneLabel||title||"").trim();
+      if(!term) return null;
+      const key=planKey(term);
+      for(const entry of MBRC_PLANNING_LINKS){
+        if(key === entry.key || key.includes(entry.key)) return entry.url;
+      }
+      return null;
+    };
+    const findPlanningSchemeLink=(title,labels=[],contextText="")=>{
+      const searchTerms=[title, ...labels].filter(Boolean);
+      const contextKey=planKey(contextText);
+      const hasSuburbanPrecinct=searchTerms.some(term=>{
+        const key=planKey(term);
+        return key.includes(SUBURBAN_PRECINCT_KEY) || key.includes(SUBURBAN_NEIGHBOURHOOD_KEY);
+      }) || (contextKey && (contextKey.includes(SUBURBAN_PRECINCT_KEY) || contextKey.includes(SUBURBAN_NEIGHBOURHOOD_KEY)));
+      const hasNextGenPrecinct=searchTerms.some(term=>{
+        const key=planKey(term);
+        return key.includes(NEXTGEN_PRECINCT_KEY) || key.includes(NEXTGEN_NEIGHBOURHOOD_KEY);
+      }) || (contextKey && (contextKey.includes(NEXTGEN_PRECINCT_KEY) || contextKey.includes(NEXTGEN_NEIGHBOURHOOD_KEY)));
+      const hasUrbanPrecinct=searchTerms.some(term=>{
+        const key=planKey(term);
+        return key.includes(URBAN_PRECINCT_KEY) || key.includes(URBAN_NEIGHBOURHOOD_KEY);
+      }) || (contextKey && (contextKey.includes(URBAN_PRECINCT_KEY) || contextKey.includes(URBAN_NEIGHBOURHOOD_KEY)));
+      const hasRuralResidential=searchTerms.some(term=>{
+        const key=planKey(term);
+        return key.includes(RURAL_RESIDENTIAL_KEY);
+      }) || (contextKey && contextKey.includes(RURAL_RESIDENTIAL_KEY));
+      const hasRuralZone=searchTerms.some(term=>{
+        const key=planKey(term);
+        return !key.includes(RURAL_RESIDENTIAL_KEY) && (key.includes(RURAL_ZONE_KEY) || key.includes(RURAL_ZONE_NAME_KEY) || key === RURAL_ONLY_KEY);
+      }) || (contextKey && !contextKey.includes(RURAL_RESIDENTIAL_KEY) && (contextKey.includes(RURAL_ZONE_KEY) || contextKey.includes(RURAL_ZONE_NAME_KEY) || contextKey === RURAL_ONLY_KEY));
+      const pickFromOverlayMap=(map)=>{
+        for(const term of searchTerms){
+          const key=planKey(term);
+          for(const entry of map){
+            if(key === entry.key || key.includes(entry.key)) return entry.url;
+          }
+        }
+        if(contextKey){
+          for(const entry of map){
+            if(contextKey.includes(entry.key)) return entry.url;
+          }
+        }
+        return null;
+      };
+      if(hasRuralResidential && !hasRuralZone){
+        const link=pickFromOverlayMap(RURAL_RESIDENTIAL_OVERLAY_LINKS);
+        if(link) return link;
+      }
+      if(hasRuralZone){
+        const link=pickFromOverlayMap(RURAL_ZONE_OVERLAY_LINKS);
+        if(link) return link;
+      }
+      if(hasSuburbanPrecinct && !hasNextGenPrecinct && !hasUrbanPrecinct){
+        const link=pickFromOverlayMap(SUBURBAN_PRECINCT_OVERLAY_LINKS);
+        if(link) return link;
+      }
+      if(hasNextGenPrecinct && !hasSuburbanPrecinct && !hasUrbanPrecinct){
+        const link=pickFromOverlayMap(NEXTGEN_PRECINCT_OVERLAY_LINKS);
+        if(link) return link;
+      }
+      if(hasUrbanPrecinct && !hasSuburbanPrecinct && !hasNextGenPrecinct){
+        const link=pickFromOverlayMap(URBAN_PRECINCT_OVERLAY_LINKS);
+        if(link) return link;
+      }
+      let link=buildPlanningSchemeLink(title);
+      if(link) return link;
+      for(const label of labels){
+        link=buildPlanningSchemeLink(label,{zoneLabel:label});
+        if(link) return link;
+      }
+      return null;
+    };
 
     const kidsOf=n=>(n.layers?.toArray?.()??n.layers)||(n.sublayers?.toArray?.()??n.sublayers)||[];
     const featureLayerCache=new WeakMap();
@@ -1311,6 +1470,10 @@ view.ui.add(new Home({view}),"top-left");
     async function countFeatures(node,geom){
       if(!node) return 0;
       const hasNativeQueries=(typeof node.queryFeatureCount==="function") || (typeof node.queryFeatures==="function");
+      const nodeTitle=node.title||"";
+      const nodePathText=nodePath(node);
+      const wetlandLayer=isWetland(nodeTitle,nodePathText);
+      const zoningLayer=isZoning(nodeTitle,nodePathText);
       const tryCount=async target=>{
         if(!target) return 0;
         const g=bufferedAOIFor(target,geom);
@@ -1330,7 +1493,8 @@ view.ui.add(new Home({view}),"top-left");
         return 0;
       };
       let cnt=await tryCount(node);
-      if(cnt>0 || hasNativeQueries) return cnt;
+      if(cnt>0) return cnt;
+      if(hasNativeQueries && !wetlandLayer && !zoningLayer) return cnt;
       const fl=await featureLayerFor(node);
       if(!fl) return cnt;
       return await tryCount(fl);
@@ -1364,6 +1528,105 @@ view.ui.add(new Home({view}),"top-left");
 
       const items = [];
       const nodes = flattenFeatureNodes().filter(n => !underDNTChain(n));
+      let precinctContext = "";
+      let zoneContext = "";
+
+      for (const n of nodes){
+        try{
+          const t = n.title || "", id = n.id || "", tg = n.portalItem?.tags || [];
+          const p = nodePath(n);
+          if (isUtility(t,id,tg,p) || isWaterOrSewer(p)) continue;
+          if (!isPrecinct(t,p)) continue;
+          await n.load();
+          const cnt = await countFeatures(n, geom);
+          if (cnt <= 0) continue;
+          const { items: keys } = await legendFromRendererUsingFeatures(n, geom);
+          for (const k of keys){
+            const labelKey = planKey(k.label);
+            if (labelKey.includes(NEXTGEN_PRECINCT_KEY) || labelKey.includes(NEXTGEN_NEIGHBOURHOOD_KEY)){
+              precinctContext = "Next generation neighbourhood precinct";
+              break;
+            }
+            if (labelKey.includes(SUBURBAN_PRECINCT_KEY) || labelKey.includes(SUBURBAN_NEIGHBOURHOOD_KEY)){
+              precinctContext = "Suburban neighbourhood precinct";
+              break;
+            }
+            if (labelKey.includes(URBAN_PRECINCT_KEY) || labelKey.includes(URBAN_NEIGHBOURHOOD_KEY)){
+              precinctContext = "Urban neighbourhood precinct";
+              break;
+            }
+          }
+          if(!precinctContext){
+            try{
+              const q=await n.queryFeatures({geometry:geom,spatialRelationship:"intersects",returnGeometry:false,outFields:["*"],num:1});
+              const label=guessPrecinctLabelFromAttrs(q.features?.[0]?.attributes);
+              const labelKey=planKey(label);
+              if(labelKey.includes(NEXTGEN_PRECINCT_KEY) || labelKey.includes(NEXTGEN_NEIGHBOURHOOD_KEY)) precinctContext = "Next generation neighbourhood precinct";
+              else if(labelKey.includes(SUBURBAN_PRECINCT_KEY) || labelKey.includes(SUBURBAN_NEIGHBOURHOOD_KEY)) precinctContext = "Suburban neighbourhood precinct";
+              else if(labelKey.includes(URBAN_PRECINCT_KEY) || labelKey.includes(URBAN_NEIGHBOURHOOD_KEY)) precinctContext = "Urban neighbourhood precinct";
+            }catch{}
+          }
+          if(!precinctContext){
+            const titleKey = planKey(t);
+            if(titleKey.includes(NEXTGEN_PRECINCT_KEY) || titleKey.includes(NEXTGEN_NEIGHBOURHOOD_KEY)) precinctContext = "Next generation neighbourhood precinct";
+            else if(titleKey.includes(SUBURBAN_PRECINCT_KEY) || titleKey.includes(SUBURBAN_NEIGHBOURHOOD_KEY)) precinctContext = "Suburban neighbourhood precinct";
+            else if(titleKey.includes(URBAN_PRECINCT_KEY) || titleKey.includes(URBAN_NEIGHBOURHOOD_KEY)) precinctContext = "Urban neighbourhood precinct";
+          }
+          if(precinctContext) break;
+        }catch{}
+      }
+
+      for (const n of nodes){
+        try{
+          const t = n.title || "", id = n.id || "", tg = n.portalItem?.tags || [];
+          const p = nodePath(n);
+          if (isUtility(t,id,tg,p) || isWaterOrSewer(p)) continue;
+          if (!isZoning(t,p)) continue;
+          await n.load();
+          const cnt = await countFeatures(n, geom);
+          const { items: keys } = await legendFromRendererUsingFeatures(n, geom);
+          for (const k of keys){
+            const labelKey = planKey(k.label);
+            if (labelKey.includes(RURAL_RESIDENTIAL_KEY)){
+              zoneContext = "Rural residential zone code";
+              break;
+            }
+            if (!labelKey.includes(RURAL_RESIDENTIAL_KEY) && (labelKey.includes(RURAL_ZONE_KEY) || labelKey.includes(RURAL_ZONE_NAME_KEY) || labelKey === RURAL_ONLY_KEY)){
+              zoneContext = "Rural zone code";
+              break;
+            }
+          }
+          if(!zoneContext){
+            const pickFromFeature = async (layer)=> {
+              try{
+                const q = await layer.queryFeatures({
+                  geometry: geom,
+                  spatialRelationship: "intersects",
+                  returnGeometry: false,
+                  outFields: ["*"],
+                  num: 1
+                });
+                const attrs = q.features?.[0]?.attributes;
+                return pickZoneLabel(attrs) || guessLabelFromAttrs(attrs);
+              }catch{ return null; }
+            };
+            let label = await pickFromFeature(n);
+            if(!label){
+              const fl = await featureLayerFor(n);
+              if(fl) label = await pickFromFeature(fl);
+            }
+            const labelKey = planKey(label);
+            if(labelKey.includes(RURAL_RESIDENTIAL_KEY)) zoneContext = "Rural residential zone code";
+            else if(!labelKey.includes(RURAL_RESIDENTIAL_KEY) && (labelKey.includes(RURAL_ZONE_KEY) || labelKey.includes(RURAL_ZONE_NAME_KEY) || labelKey === RURAL_ONLY_KEY)) zoneContext = "Rural zone code";
+          }
+          if(!zoneContext){
+            const titleKey = planKey(t);
+            if(titleKey.includes(RURAL_RESIDENTIAL_KEY)) zoneContext = "Rural residential zone code";
+            else if(!titleKey.includes(RURAL_RESIDENTIAL_KEY) && (titleKey.includes(RURAL_ZONE_KEY) || titleKey.includes(RURAL_ZONE_NAME_KEY) || titleKey === RURAL_ONLY_KEY)) zoneContext = "Rural zone code";
+          }
+          if(zoneContext) break;
+        }catch{}
+      }
 
       for (const n of nodes){
         try{
@@ -1384,9 +1647,12 @@ view.ui.add(new Home({view}),"top-left");
             : "";
 
           const title = htmlEsc(t || "Layer");
+          const contextText = [zoneContext, precinctContext, p].filter(Boolean).join(" ");
+          const schemeLink = findPlanningSchemeLink(t, keys.map(k=>k.label), contextText);
+          const schemeHTML = schemeLink ? `<a href="${schemeLink}" target="_blank" rel="noopener" style="font-size:12px;text-decoration:none;margin-left:6px">Planning scheme</a>` : "";
           items.push(
             `<li>
-               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span></div>
+               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span>${schemeHTML}</div>
                ${keyHTML}
              </li>`
           );
@@ -1462,6 +1728,18 @@ view.ui.add(new Home({view}),"top-left");
         if (k) {
           const v = String(attrs[k] ?? "").trim();
           if (v) return v;
+        }
+      }
+      return null;
+    };
+    const guessPrecinctLabelFromAttrs = attrs => {
+      if(!attrs) return null;
+      const patt=[/precinct/i,/neighbourhood/i];
+      for(const r of patt){
+        const k=Object.keys(attrs).find(x=>r.test(x));
+        if(k){
+          const v=String(attrs[k] ?? "").trim();
+          if(v) return v;
         }
       }
       return null;
@@ -1603,18 +1881,21 @@ view.ui.add(new Home({view}),"top-left");
           if(!legendOnLot){ try{ const onScr=geometryEngine.intersect(lotGeom,view.extent); if(onScr) legendGeom=onScr; }catch{} }
 
           const legendParts=[];
+          const legendLabels=[];
           for(const n of targets){
             if(underDNTChain(n)) continue;
             if(typeof n.queryFeatures!=="function" && typeof n.queryFeatureCount!=="function") continue;
             const {items}=await legendFromRendererUsingFeatures(n,legendGeom);
             if(items.length){
+              legendLabels.push(...items.map(i=>i.label));
               const inner=items.map(i=>`<div class="row">${i.swatchHTML}${i.label.replace(/&/g,"&amp;")}</div>`).join("");
               legendParts.push(`<div style="margin-bottom:6px"><b>${(n.title||"Layer").replace(/&/g,"&amp;")}</b><div class="leg" style="margin-top:4px">${inner}</div></div>`);
             }
           }
 
           const count=await countFeaturesSum(nodes,lotGeom);
-          return {title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,legendHTML:legendParts.join(""),count};
+          const schemeLink = findPlanningSchemeLink(title, legendLabels);
+          return {title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,legendHTML:legendParts.join(""),count,schemeLink};
         });
       } finally {
         for(const [n,op] of opSnap){ try{n.opacity=op;}catch{} }
@@ -1817,7 +2098,8 @@ view.ui.add(new Home({view}),"top-left");
                               html.push("<ul class='sumlist'>");
                               for(const s of shots){
                                 const ct=(s.count!=null)?(" ("+s.count+" feature"+(s.count===1?"":"s")+")"):"";
-                                html.push("<li><a class='sum-link' style='color:#7a0f16;font-weight:700;text-decoration:none' href='#",s.id,"'>",esc(s.title),"</a>",ct,(s.note?(" - "+esc(s.note)):""),"</li>");
+                                const schemeHTML = s.schemeLink ? " <a class='sum-link' style='font-size:12px;text-decoration:none' target='_blank' rel='noopener' href='" + esc(s.schemeLink) + "'>Planning scheme</a>" : "";
+                                html.push("<li><a class='sum-link' style='color:#7a0f16;font-weight:700;text-decoration:none' href='#",s.id,"'>",esc(s.title),"</a>",ct,(s.note?(" - "+esc(s.note)):""),schemeHTML,"</li>");
                               }
                               html.push("</ul>");
                             }else{
@@ -1837,6 +2119,7 @@ view.ui.add(new Home({view}),"top-left");
               "<h2 class='section-title' style='margin:0'>",esc(s.title),"</h2>",
               "<div class='overlay-actions'>",
                 "<a class='backbtn' href='#summary'>Back to Summary</a>",
+                (s.schemeLink ? "<a class='backbtn' target='_blank' rel='noopener' href='"+esc(s.schemeLink)+"'>Open planning scheme</a>" : ""),
               "</div>",
             "</div>",
             "<div class='map-legend'>",

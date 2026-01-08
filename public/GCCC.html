@@ -112,6 +112,34 @@
   .rptStep{background:#fbfbfc;border:1px dashed #e2e4e8;border-radius:10px;padding:10px;font-size:12px;color:#475467}
   .rptDone{border-color:#cfe6d2;background:#f2faf3;color:#1e7a31;font-weight:600}
 
+  /* Report viewer (in-page, avoids new tab) */
+  #reportViewer{
+    position:fixed;
+    inset:0;
+    display:none;
+    z-index:10001;
+    background:rgba(12,14,18,.75);
+    backdrop-filter:blur(3px);
+    place-items:center;
+    padding:16px;
+  }
+  #reportViewer.active{display:grid;}
+  .viewer-shell{width:min(1100px,96vw);}
+  .viewer-bar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px}
+  .viewer-btn{
+    border:1px solid #d7d7d7;border-radius:999px;padding:6px 12px;font-size:12px;color:#333;
+    background:#f7f7f7;cursor:pointer;
+  }
+  .viewer-btn:hover{background:#eee}
+  #reportFrame{
+    width:100%;
+    height:min(90vh,900px);
+    border:1px solid #e6e8ec;
+    border-radius:12px;
+    background:#fff;
+    box-shadow:0 20px 48px rgba(16,21,28,.12);
+  }
+
   /* Payment access gate */
   #accessGate{
     position:fixed;
@@ -287,6 +315,15 @@
     </div>
   </div>
 
+  <div id="reportViewer" aria-hidden="true">
+    <div class="viewer-shell" role="dialog" aria-modal="true">
+      <div class="viewer-bar">
+        <button id="closeReportBtn" class="viewer-btn" type="button">Close report</button>
+      </div>
+      <iframe id="reportFrame" title="Report preview"></iframe>
+    </div>
+  </div>
+
   <script type="module">
     /* ---------------- ArcGIS imports ---------------- */
     import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
@@ -376,6 +413,20 @@
     const setGateMessage = (title, msg)=>{
       setText("accessGateTitle", title);
       setText("accessGateMsg", msg);
+    };
+
+    const setReportViewerVisible = on=>{
+      const viewer = $("reportViewer");
+      if(!viewer) return;
+      viewer.classList.toggle("active", !!on);
+      viewer.setAttribute("aria-hidden", on ? "false" : "true");
+    };
+
+    const setReportFrameHTML = html=>{
+      const frame = $("reportFrame");
+      if(frame){
+        frame.srcdoc = html || "";
+      }
     };
 
     const setPaymentLink = url=>{
@@ -1599,14 +1650,20 @@ view.ui.add(new Home({view}),"top-left");
             return;
           }
           if(!lastReportHTML){ alert("Report not ready yet."); return; }
-          const w=window.open("about:blank","_blank");
-          if(!w){ alert("Please allow pop-ups to view the report."); return; }
-          w.document.open();
-          w.document.write(lastReportHTML);
-          w.document.close();
-          try{ w.document.title = lastReportTitle; }catch{}
+          setReportFrameHTML(lastReportHTML);
+          setReportViewerVisible(true);
           document.getElementById("rptOverlay").style.display="none";
           finalizeTokenAndLock();
+        });
+      }
+    })();
+
+    (function wireReportViewer(){
+      const closeBtn = $("closeReportBtn");
+      if(closeBtn){
+        closeBtn.addEventListener("click", ()=>{
+          setReportViewerVisible(false);
+          setReportFrameHTML("");
         });
       }
     })();

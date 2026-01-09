@@ -1650,8 +1650,12 @@ view.ui.add(new Home({view}),"top-left");
             return;
           }
           if(!lastReportHTML){ alert("Report not ready yet."); return; }
-          setReportFrameHTML(lastReportHTML);
-          setReportViewerVisible(true);
+          const w=window.open("about:blank","_blank");
+          if(!w){ alert("Please allow pop-ups to view the report."); return; }
+          w.document.open();
+          w.document.write(lastReportHTML);
+          w.document.close();
+          try{ w.document.title = lastReportTitle; }catch{}
           document.getElementById("rptOverlay").style.display="none";
           finalizeTokenAndLock();
         });

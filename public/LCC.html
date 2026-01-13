@@ -416,7 +416,7 @@
       countdownTimer: null
     };
 
-    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/14AbJ11vU3gtbdNcMF7ss02";
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/00w14n7Ui3gtbdNh2V7ss0e";
 
     const getQueryParam = function(name){
       try{
@@ -791,6 +791,49 @@ function framedExtent(geom){
     const isNoise=function(t,p){ return /\b(noise|acoustic|transport.*noise.*corridor|tnc)\b/i.test(inText(t,p)); };
     const isZoning=function(t,p){ return /\b(zoning|zone|zones)\b/i.test(inText(t,p)); };
     const isBushfire=function(t,p){ return /\b(bush[-\s]?fire|bushfire|bush\s*fire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p)); };
+    const planKey=function(s){ return String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,""); };
+    const zoneBaseKey=function(s){ return planKey(s).replace(/zonecode|zone/g,""); };
+    const LOGAN_ZONE_LINKS=new Map([
+      [zoneBaseKey("Centre"),"https://logan.isoplan.com.au/eplan/rules/0/25/0/0/0/203"],
+      [zoneBaseKey("Community facilities"),"https://logan.isoplan.com.au/eplan/rules/0/28/0/0/0/203"],
+      [zoneBaseKey("Emerging community"),"https://logan.isoplan.com.au/eplan/rules/0/29/0/0/0/203"],
+      [zoneBaseKey("Environmental management and conservation"),"https://logan.isoplan.com.au/eplan/rules/0/30/0/0/0/203"],
+      [zoneBaseKey("Low density residential"),"https://logan.isoplan.com.au/eplan/rules/0/31/0/0/0/203"],
+      [zoneBaseKey("Low impact industry"),"https://logan.isoplan.com.au/eplan/rules/0/32/0/0/0/203"],
+      [zoneBaseKey("Low-medium density residential"),"https://logan.isoplan.com.au/eplan/rules/0/33/0/0/0/203"],
+      [zoneBaseKey("Medium density residential"),"https://logan.isoplan.com.au/eplan/rules/0/34/0/0/0/203"],
+      [zoneBaseKey("Medium impact industry"),"https://logan.isoplan.com.au/eplan/rules/0/41/0/0/0/203"],
+      [zoneBaseKey("Mixed use"),"https://logan.isoplan.com.au/eplan/rules/0/40/0/0/0/203"],
+      [zoneBaseKey("Recreation and open space"),"https://logan.isoplan.com.au/eplan/rules/0/39/0/0/0/203"],
+      [zoneBaseKey("Rural"),"https://logan.isoplan.com.au/eplan/rules/0/38/0/0/0/203"],
+      [zoneBaseKey("Rural residential"),"https://logan.isoplan.com.au/eplan/rules/0/37/0/0/0/203"],
+      [zoneBaseKey("Special purpose"),"https://logan.isoplan.com.au/eplan/rules/0/36/0/0/0/203"],
+      [zoneBaseKey("Specialised centre"),"https://logan.isoplan.com.au/eplan/rules/0/35/0/0/0/203"]
+    ]);
+    const LOGAN_OVERLAY_LINKS=new Map([
+      [planKey("Biodiversity corridor"),"https://logan.isoplan.com.au/eplan/rules/0/63/0/0/0/203"],
+      [planKey("Bushfire Hazard"),"https://logan.isoplan.com.au/eplan/rules/0/62/0/0/0/203"],
+      [planKey("Extractive resources"),"https://logan.isoplan.com.au/eplan/rules/0/61/0/0/0/203"],
+      [planKey("Flood Risk"),"https://logan.isoplan.com.au/eplan/rules/0/60/0/0/0/203"],
+      [planKey("Heritage"),"https://logan.isoplan.com.au/eplan/rules/0/58/0/0/0/203"],
+      [planKey("Landslide hazard and steep slope area"),"https://logan.isoplan.com.au/eplan/rules/0/57/0/0/0/203"]
+    ]);
+    const findLoganZoneLink=function(title,labels){
+      var searchTerms=[title].concat(labels||[]).filter(Boolean);
+      for(var i=0;i<searchTerms.length;i++){
+        var base=zoneBaseKey(searchTerms[i]);
+        if(LOGAN_ZONE_LINKS.has(base)) return LOGAN_ZONE_LINKS.get(base);
+      }
+      return null;
+    };
+    const findLoganOverlayLink=function(title,labels){
+      var searchTerms=[title].concat(labels||[]).filter(Boolean);
+      for(var i=0;i<searchTerms.length;i++){
+        var key=planKey(searchTerms[i]);
+        if(LOGAN_OVERLAY_LINKS.has(key)) return LOGAN_OVERLAY_LINKS.get(key);
+      }
+      return null;
+    };
 
     function kidsOf(n){
       var arr=null;
@@ -2328,9 +2371,14 @@ view.ui.add(new Home({view:view}),"top-left");
             : "";
 
           const title = htmlEsc(t || "Layer");
+          var schemeLink = isZoning(t,p) ? findLoganZoneLink(t, keys.map(function(k){ return k.label; })) : null;
+          if(!schemeLink){
+            schemeLink = findLoganOverlayLink(t, keys.map(function(k){ return k.label; }));
+          }
+          const schemeHTML = schemeLink ? '<a href="'+schemeLink+'" target="_blank" rel="noopener" style="font-size:12px;text-decoration:none;margin-left:6px">Planning scheme</a>' : "";
           items.push(
             '<li>' +
-               '<div class="ov-title">'+title+' <span style="color:#777">('+cnt+')</span></div>' +
+               '<div class="ov-title">'+title+' <span style="color:#777">('+cnt+')</span>'+schemeHTML+'</div>' +
                keyHTML +
             '</li>'
           );

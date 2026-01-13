@@ -654,7 +654,7 @@
 
 
 
-    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/eVq14n2zY04hbdN4g97ss03";
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/6oUfZh6QedV7chReUN7ss0f";
 
 
 
@@ -1099,6 +1099,74 @@
     const isZoning=(t,p="")=>/\b(zoning|zone|zones)\b/i.test(inText(t,p));
 
     const isBushfire=(t,p="")=>/\b(bush[-\s]?fire|bushfire|bush\s*fire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p));
+
+    const planKey=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"");
+    const zoneBaseKey=s=>planKey(s).replace(/zonecode|zone/g,"");
+    const SCRC_ZONE_LINKS=new Map([
+      [zoneBaseKey("Low density residential"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407316/File/document"],
+      [zoneBaseKey("Medium density residential"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407317/File/document"],
+      [zoneBaseKey("High density residential"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407318/File/document"],
+      [zoneBaseKey("Tourist accommodation"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407319/File/document"],
+      [zoneBaseKey("Principal centre"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407320/File/document"],
+      [zoneBaseKey("Major centre"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407322/File/document"],
+      [zoneBaseKey("District centre"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407323/File/document"],
+      [zoneBaseKey("Local centre"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407324/File/document"],
+      [zoneBaseKey("Low impact industry"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407325/File/document"],
+      [zoneBaseKey("Medium impact industry"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407326/File/document"],
+      [zoneBaseKey("High impact industry"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407327/File/document"],
+      [zoneBaseKey("Waterfront and marine industry"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407328/File/document"],
+      [zoneBaseKey("Sport and recreation"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407329/File/document"],
+      [zoneBaseKey("Open space"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407330/File/document"],
+      [zoneBaseKey("Environmental management and conservation"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407331/File/document"],
+      [zoneBaseKey("Community facilities"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407332/File/document"],
+      [zoneBaseKey("Emerging community"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407333/File/document"],
+      [zoneBaseKey("Limited development (landscape residential)"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407334/File/document"],
+      [zoneBaseKey("Rural"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407335/File/document"],
+      [zoneBaseKey("Rural residential"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407336/File/document"],
+      [zoneBaseKey("Specialised centre"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407337/File/document"],
+      [zoneBaseKey("Tourism"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407338/File/document"]
+    ]);
+    const SCRC_OVERLAY_LINKS=new Map([
+      [planKey("Acid sulfate soils overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407371/File/document"],
+      [planKey("Airport environs overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407372/File/document"],
+      [planKey("Biodiversity, waterways and wetlands overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407373/File/document"],
+      [planKey("Bushfire hazard overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407374/File/document"],
+      [planKey("Bushfire hazard area buffer"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407374/File/document"],
+      [planKey("Bushfire hazard area"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407374/File/document"],
+      [planKey("Bushfire"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407374/File/document"],
+      [planKey("Coastal protection overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407375/File/document"],
+      [planKey("Extractive resources overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407376/File/document"],
+      [planKey("Flood hazard overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407377/File/document"],
+      [planKey("Height of buildings and structures overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407378/File/document"],
+      [planKey("Maximum height of buildings and structures"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407378/File/document"],
+      [planKey("Height of buildings and structures"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407378/File/document"],
+      [planKey("Heritage and character areas overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407379/File/document"],
+      [planKey("Landslide hazard and steep land overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407380/File/document"],
+      [planKey("Landslide hazard"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407380/File/document"],
+      [planKey("Steep land"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407380/File/document"],
+      [planKey("Steep land (slope)"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407380/File/document"],
+      [planKey("Regional infrastructure overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407381/File/document"],
+      [planKey("Scenic amenity overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407382/File/document"],
+      [planKey("Water resource catchments overlay code"),"https://publicdocs.scc.qld.gov.au/hpecmwebdrawer/Record/22407383/File/document"]
+    ]);
+    const findScrcZoneLink=(title,labels=[])=>{
+      const searchTerms=[title, ...labels].filter(Boolean);
+      for(const term of searchTerms){
+        const base=zoneBaseKey(term);
+        if(SCRC_ZONE_LINKS.has(base)) return SCRC_ZONE_LINKS.get(base);
+      }
+      return null;
+    };
+    const findScrcOverlayLink=(title,labels=[])=>{
+      const searchTerms=[title, ...labels].filter(Boolean);
+      for(const term of searchTerms){
+        const key=planKey(term);
+        for(const [entryKey, url] of SCRC_OVERLAY_LINKS){
+          if(key === entryKey || key.includes(entryKey) || entryKey.includes(key)) return url;
+        }
+      }
+      return null;
+    };
 
 
 
@@ -2007,12 +2075,17 @@ view.ui.add(new Home({view}),"top-left");
 
 
           const title = htmlEsc(t || "Layer");
+          let schemeLink = isZoning(t,p) ? findScrcZoneLink(t, keys.map(k=>k.label)) : null;
+          if(!schemeLink){
+            schemeLink = findScrcOverlayLink(t, keys.map(k=>k.label));
+          }
+          const schemeHTML = schemeLink ? `<a href="${schemeLink}" target="_blank" rel="noopener" style="font-size:12px;text-decoration:none;margin-left:6px">Planning scheme</a>` : "";
 
           items.push(
 
             `<li>
 
-               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span></div>
+               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span>${schemeHTML}</div>
 
                ${keyHTML}
 

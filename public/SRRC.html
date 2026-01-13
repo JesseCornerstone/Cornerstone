@@ -290,7 +290,7 @@
       paymentUrl: null
     };
 
-    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/14AdR9a2q9ERfu3eUN7ss05";
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/8x23cv5Ma6sF2Hh5kd7ss0h";
 
     const getQueryParam = name=>{
       try{
@@ -431,6 +431,63 @@
     const isNoise=(t,p="")=>/\b(noise|acoustic)\b/i.test(inText(t,p));
     const isZoning=(t,p="")=>/\b(zoning|zone|zones)\b/i.test(inText(t,p));
     const isBushfire=(t,p="")=>/\b(bush[-\s]?fire|bushfire|wild[-\s]?fire|fire\s*hazard)\b/i.test(inText(t,p));
+    const planKey=s=>String(s||"").toLowerCase().replace(/[^a-z0-9]+/g,"");
+    const zoneBaseKey=s=>planKey(s).replace(/zonecode|zone/g,"");
+    const SRRC_ZONE_LINKS=new Map([
+      [zoneBaseKey("Community Facilities"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/128/0/0/0/74"],
+      [zoneBaseKey("Conservation"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/127/0/0/0/74"],
+      [zoneBaseKey("District Centre"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/126/0/0/0/74"],
+      [zoneBaseKey("Emerging Community"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/125/0/0/0/74"],
+      [zoneBaseKey("Industry"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/124/0/0/0/74"],
+      [zoneBaseKey("Limited Development"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/123/0/0/0/74"],
+      [zoneBaseKey("Local Centre"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/122/0/0/0/74"],
+      [zoneBaseKey("Low Density Residential"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/121/0/0/0/74"],
+      [zoneBaseKey("Low-medium Density Residential"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/120/0/0/0/74"],
+      [zoneBaseKey("Major Centre"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/119/0/0/0/74"],
+      [zoneBaseKey("Major Tourism"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/118/0/0/0/74"],
+      [zoneBaseKey("Minor Tourism"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/117/0/0/0/74"],
+      [zoneBaseKey("Mixed Use"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/116/0/0/0/74"],
+      [zoneBaseKey("Neighbourhood Centre"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/115/0/0/0/74"],
+      [zoneBaseKey("Recreation and Open Space"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/114/0/0/0/74"],
+      [zoneBaseKey("Rural Residential"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/113/0/0/0/74"],
+      [zoneBaseKey("Rural"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/112/0/0/0/74"],
+      [zoneBaseKey("Special Purpose"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/111/0/0/0/74"],
+      [zoneBaseKey("Township"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/110/0/0/0/74"]
+    ]);
+    const SRRC_OVERLAY_LINKS=new Map([
+      [planKey("Agricultural Land Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/105/0/0/0/74"],
+      [planKey("Agricultural Land Classification"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/105/0/0/0/74"],
+      [planKey("Agricultural Land Buffer Area"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/105/0/0/0/74"],
+      [planKey("Airport Environs and Defence Land Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/104/0/0/0/74"],
+      [planKey("Bushfire Hazard Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/103/0/0/0/74"],
+      [planKey("Environmental Significance Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/102/0/0/0/74"],
+      [planKey("Extractive Resources Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/101/0/0/0/74"],
+      [planKey("Flood Hazard Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/100/0/0/0/74"],
+      [planKey("Landslide Hazard and Steep Slope Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/99/0/0/0/74"],
+      [planKey("Local Heritage Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/98/0/0/0/74"],
+      [planKey("Regional Infrastructure Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/97/0/0/0/74"],
+      [planKey("Water Resource Catchments Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/96/0/0/0/74"],
+      [planKey("Master Plan Areas Overlay Code"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/95/0/0/0/74"],
+      [planKey("Transport Noise Corridor Overlay"),"https://planningscheme.scenicrim.qld.gov.au/eplan/rules/0/94/0/0/0/74"]
+    ]);
+    const findSrrcZoneLink=(title,labels=[])=>{
+      const searchTerms=[title, ...labels].filter(Boolean);
+      for(const term of searchTerms){
+        const base=zoneBaseKey(term);
+        if(SRRC_ZONE_LINKS.has(base)) return SRRC_ZONE_LINKS.get(base);
+      }
+      return null;
+    };
+    const findSrrcOverlayLink=(title,labels=[])=>{
+      const searchTerms=[title, ...labels].filter(Boolean);
+      for(const term of searchTerms){
+        const key=planKey(term);
+        for(const [entryKey, url] of SRRC_OVERLAY_LINKS){
+          if(key === entryKey || key.includes(entryKey) || entryKey.includes(key)) return url;
+        }
+      }
+      return null;
+    };
 
     const kidsOf=n=>(n.layers?.toArray?.()??n.layers)||(n.sublayers?.toArray?.()??n.sublayers)||[];
         const nodePath=n=>{const bits=[]; let cur=n; while(cur){bits.unshift(cur.title||cur.id||"node"); cur=cur.parent;} return bits.join(" / ");};
@@ -848,9 +905,14 @@ view.ui.add(new Home({view}),"top-left");
             : "";
 
           const title=htmlEsc(t || "Layer");
+          let schemeLink=isZoning(t,p) ? findSrrcZoneLink(t, keys.map(k=>k.label)) : null;
+          if(!schemeLink){
+            schemeLink = findSrrcOverlayLink(t, keys.map(k=>k.label));
+          }
+          const schemeHTML=schemeLink ? `<a href="${schemeLink}" target="_blank" rel="noopener" style="font-size:12px;text-decoration:none;margin-left:6px">Planning scheme</a>` : "";
           items.push(
             `<li>
-               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span></div>
+               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span>${schemeHTML}</div>
                ${keyHTML}
              </li>`
           );

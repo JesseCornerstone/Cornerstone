@@ -605,7 +605,10 @@ app.get('/api/stripe/success', async (req, res) => {
         .send('Stripe is not configured. Missing STRIPE_SECRET_KEY.');
     }
 
-    const sessionId = req.query.session_id;
+    const rawSessionId = req.query.session_id;
+    const sessionId = Array.isArray(rawSessionId)
+      ? rawSessionId[rawSessionId.length - 1]
+      : rawSessionId;
     if (!sessionId) {
       return res.status(400).send('Missing session_id.');
     }
@@ -626,7 +629,9 @@ app.get('/api/stripe/success', async (req, res) => {
     return res.redirect(303, `${baseUrl}/${returnPath}${sep}key=${token}`);
   } catch (err) {
     console.error('Stripe success error:', err);
-    return res.status(500).send('Failed to finalise payment.');
+    const detail =
+      (err && (err.message || err.type || err.code)) ? ` ${err.message || err.type || err.code}` : '';
+    return res.status(500).send(`Failed to finalise payment.${detail}`);
   }
 });
 

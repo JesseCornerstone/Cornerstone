@@ -2942,6 +2942,49 @@
 
     }
 
+    async function legendFromRendererAllItems(layerNode){
+
+      const r=layerNode?.renderer;
+
+      if(!r) return {items:[]};
+
+      const itemMap=new Map();
+
+      const pushItem=async(label,symbol)=>{
+        if(!label || itemMap.has(label)) return;
+        if(!symbol) return;
+        const sw=await swatchHTML(symbol);
+        itemMap.set(label,{label,swatchHTML:sw});
+      };
+
+      if(r.type==="unique-value"){
+        const infos=[
+          ...(r.uniqueValueInfos||[]),
+          ...((r.uniqueValueGroups||[]).flatMap(g=>g.uniqueValueInfos||[]))
+        ];
+        for(const info of infos){
+          const label=String(info.label ?? info.value ?? (Array.isArray(info.values)? info.values.join(", "): "Class"));
+          await pushItem(label, info.symbol || r.defaultSymbol || r.symbol);
+        }
+        if(!itemMap.size){
+          await pushItem(r.label || layerNode.title || "Layer", r.defaultSymbol || r.symbol);
+        }
+      }else if(r.type==="class-breaks"){
+        for(const info of (r.classBreakInfos||[])){
+          const label=String(info.label ?? `${info.minValue ?? ""} - ${info.maxValue ?? ""}`);
+          await pushItem(label, info.symbol || r.defaultSymbol || r.symbol);
+        }
+        if(!itemMap.size){
+          await pushItem(r.label || layerNode.title || "Layer", r.defaultSymbol || r.symbol);
+        }
+      }else{
+        await pushItem(r.label || layerNode.title || "Layer", r.symbol || r.defaultSymbol);
+      }
+
+      return {items:[...itemMap.values()]};
+
+    }
+
 
 
     /* ---------------- HARD-WIRED MATCHING ---------------- */
@@ -3409,7 +3452,7 @@
 
 
 
-    async function screenshotFor(nodes,title,lotGeom,legendOnLot=false,{forceAllVisible=false,legendUseExtent=false}={}){
+    async function screenshotFor(nodes,title,lotGeom,legendOnLot=false,{forceAllVisible=false,legendUseExtent=false,legendAllRendererItems=false}={}){
 
       if(!nodes?.length || !lotGeom) return null;
 
@@ -3520,7 +3563,9 @@
 
             try{
 
-              const res=await withTimeout(legendFromRendererUsingFeatures(n,legendGeom), QUERY_TIMEOUT_MS, "legend build");
+              const res=legendAllRendererItems
+                ? await withTimeout(legendFromRendererAllItems(n), QUERY_TIMEOUT_MS, "legend build")
+                : await withTimeout(legendFromRendererUsingFeatures(n,legendGeom), QUERY_TIMEOUT_MS, "legend build");
 
               const items=res?.items||[];
 
@@ -3743,35 +3788,34 @@
 
         let baseShot = null;
 
+        const captureBaseShot = async()=>{
+          const visSnap = saveVisibility(view.map);
+          try{
+            walkAny(view.map,(n)=>{
+              if(!("visible" in n)) return;
+              if(n.type==="feature" || n.type==="sublayer"){
+                try{ n.visible=false; }catch{}
+              }
+            });
+            try{ selLayer.visible=true; }catch{}
+            await waitViewIdle(120);
+            try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle"); }catch{}
+            try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle 2"); }catch{}
+            return await withTimeout(
+              view.takeScreenshot(getShotOptions()),
+              SCREENSHOT_TIMEOUT_MS,
+              "base screenshot"
+            );
+          } finally {
+            restoreVisibility(view.map, visSnap);
+          }
+        };
+
         try{
 
           baseShot = geom
-
-            ? await withViewOnGeom(geom, async()=>{
-
-                try{selLayer.visible=true;}catch{};
-
-                await waitViewIdle(120);
-                try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle"); }catch{}
-                try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle 2"); }catch{}
-
-                return await withTimeout(
-                  view.takeScreenshot(getShotOptions()),
-                  SCREENSHOT_TIMEOUT_MS,
-                  "base screenshot"
-                );
-
-              })
-
-            : await withTimeout(
-                (async()=>{
-                  try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle"); }catch{}
-                  try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle 2"); }catch{}
-                  return view.takeScreenshot(getShotOptions());
-                })(),
-                SCREENSHOT_TIMEOUT_MS,
-                "base screenshot"
-              );
+            ? await withViewOnGeom(geom, captureBaseShot)
+            : await captureBaseShot();
 
         }catch(e){
 
@@ -3913,7 +3957,7 @@
 
           ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",collectAllBushfireDisplayNodes,geom,baseShot,"No bushfire Lv"); }],
 
-          ["Utilities", async()=>{ const all=collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=> isUtility(t,id,tg)||isWaterOrSewer(p),{includeDNT:true}); if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true,legendUseExtent:true}); if(s) shots.push(s); } } ],
+          ["Utilities", async()=>{ const all=collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=> isUtility(t,id,tg)||isWaterOrSewer(p),{includeDNT:true}); if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true,legendUseExtent:true,legendAllRendererItems:true}); if(s) shots.push(s); } } ],
 
           ["Acid overlays", async()=>{ if(skipMinor) return; if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
 

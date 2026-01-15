@@ -798,7 +798,7 @@
       countdownTimer: null
     };
 
-    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/7sY00jfmK18l81BfYR7ss0a";
+    const PAYMENT_FALLBACK_URL = "https://buy.stripe.com/3cIfZhgqOeZb95F9At7ss00";
 
     const getQueryParam = name=>{
       try{
@@ -3409,7 +3409,7 @@
 
 
 
-    async function screenshotFor(nodes,title,lotGeom,legendOnLot=false,{forceAllVisible=false}={}){
+    async function screenshotFor(nodes,title,lotGeom,legendOnLot=false,{forceAllVisible=false,legendUseExtent=false}={}){
 
       if(!nodes?.length || !lotGeom) return null;
 
@@ -3504,8 +3504,8 @@
 
 
           let legendGeom=lotGeom;
-
-          if(!legendOnLot){ try{ const onScr=geometryEngine.intersect(lotGeom,view.extent); if(onScr) legendGeom=onScr; }catch{} }
+          if(legendUseExtent && view?.extent){ legendGeom=view.extent; }
+          else if(!legendOnLot){ try{ const onScr=geometryEngine.intersect(lotGeom,view.extent); if(onScr) legendGeom=onScr; }catch{} }
 
 
 
@@ -3913,7 +3913,7 @@
 
           ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",collectAllBushfireDisplayNodes,geom,baseShot,"No bushfire Lv"); }],
 
-          ["Utilities", async()=>{ const all=collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=> isUtility(t,id,tg)||isWaterOrSewer(p),{includeDNT:true}); if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true}); if(s) shots.push(s); } } ],
+          ["Utilities", async()=>{ const all=collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=> isUtility(t,id,tg)||isWaterOrSewer(p),{includeDNT:true}); if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true,legendUseExtent:true}); if(s) shots.push(s); } } ],
 
           ["Acid overlays", async()=>{ if(skipMinor) return; if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
 

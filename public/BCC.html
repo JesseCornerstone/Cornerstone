@@ -1759,6 +1759,13 @@
 
     function enforceOverlayRules(){ walkAny(webmap,(node,underDNT)=>{ if(node.type==="graphics"){try{node.listMode="hide";}catch{} return;} if(!("visible"in node)) return; const alwaysOn=ALWAYS_ON_IDS.has(node.id); (underDNT||alwaysOn)?keepOnHidden(node):startHidden(node); }); }
 
+    function enforceDNTVisibleInMap(){
+      walkAny(view?.map,(node,underDNT)=>{
+        if(!underDNT) return;
+        keepOnHidden(node);
+      });
+    }
+
     ;[300,900,1800,3500].forEach(ms=> setTimeout(()=>{ try{enforceOverlayRules();}catch{} },ms));
 
     (async()=>{ showLoading(true); try{ await webmap.loadAll(); enforceOverlayRules(); }catch(e){ console.warn("WebMap auth/fail; fallback basemap",e); webmap=new WebMap({basemap:"streets-vector"}); webmap.add(selLayer); view.map=webmap; } finally{ showLoading(false);} })();
@@ -2127,6 +2134,41 @@
 
       const candidates = [];
 
+      const scoreCandidate = (feature, addr, baseScore)=>{
+        let score = baseScore;
+        try{
+          if(feature?.geometry && lotGeom){
+            const g = projectToViewSR(feature.geometry);
+            if(g?.type==="point"){
+              try{
+                if(geometryEngine.contains(lotGeom, g)) score += 4;
+              }catch{}
+              if(centroid){
+                try{
+                  const d = geometryEngine.distance(centroid, g, "meters");
+                  if(d <= 10) score += 2;
+                  else if(d <= 20) score += 1;
+                }catch{}
+              }
+            }else if(g){
+              try{
+                const inter = geometryEngine.intersect(lotGeom, g);
+                const interArea = inter ? Math.abs(geometryEngine.planarArea(inter, "square-meters") || 0) : 0;
+                if(interArea > 0){
+                  const featArea = Math.abs(geometryEngine.planarArea(g, "square-meters") || 0);
+                  const ratio = featArea > 0 ? interArea / featArea : 0;
+                  if(ratio >= 0.5) score += 4;
+                  else if(ratio >= 0.2) score += 3;
+                  else score += 1;
+                }
+              }catch{}
+            }
+          }
+        }catch{}
+        if(/\d/.test(addr)) score += 1;
+        return score;
+      };
+
 
 
       for(const n of nodes){
@@ -2151,7 +2193,7 @@
 
             const addr = parseAddress(f.attributes);
 
-            if(addr) candidates.push({addr, score: 3, layer:n});
+            if(addr) candidates.push({addr, score: scoreCandidate(f, addr, 3), layer:n});
 
           });
 
@@ -2161,7 +2203,7 @@
 
             const r2 = await n.queryFeatures({
 
-              geometry: centroid, distance: 40, units: "meters",
+              geometry: centroid, distance: 20, units: "meters",
 
               spatialRelationship: "intersects", returnGeometry: false,
 
@@ -2173,7 +2215,7 @@
 
               const addr = parseAddress(f.attributes);
 
-              if(addr) candidates.push({addr, score: 2, layer:n});
+              if(addr) candidates.push({addr, score: scoreCandidate(f, addr, 1), layer:n});
 
             });
 
@@ -3483,6 +3525,7 @@
             try{ n.visible=false; }catch{}
 
           });
+          enforceDNTVisibleInMap();
 
           try{ selLayer.visible=true; }catch{}
 
@@ -3797,6 +3840,7 @@
                 try{ n.visible=false; }catch{}
               }
             });
+            enforceDNTVisibleInMap();
             try{ selLayer.visible=true; }catch{}
             await waitViewIdle(120);
             try{ await withTimeout(waitViewIdle(280), SCREENSHOT_TIMEOUT_MS, "base idle settle"); }catch{}

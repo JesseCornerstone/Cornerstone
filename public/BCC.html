@@ -200,6 +200,32 @@
 
 
   .sumlist{margin:6px 0 0 18px;padding:0}.sumlist li{margin:8px 0 12px}
+  .ov-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .ov-title .ov-name{font-weight:600}
+  .ov-toggle{
+    margin-left:auto;
+    border:1px solid rgba(167,11,19,.28);
+    background:linear-gradient(180deg,rgba(167,11,19,.08) 0%,rgba(167,11,19,.02) 100%);
+    border-radius:999px;
+    padding:5px 12px;
+    font-size:12px;
+    font-weight:600;
+    letter-spacing:.2px;
+    cursor:pointer;
+    color:#7f0e15;
+    box-shadow:0 1px 2px rgba(16,21,28,.12);
+    transition:transform .08s ease, box-shadow .15s ease, background-color .15s ease, border-color .15s ease;
+  }
+  .ov-toggle:hover{
+    background:linear-gradient(180deg,rgba(167,11,19,.14) 0%,rgba(167,11,19,.05) 100%);
+    border-color:rgba(167,11,19,.45);
+  }
+  .ov-toggle:active{transform:translateY(1px);box-shadow:0 0 0 rgba(0,0,0,0)}
+  .ov-toggle[aria-pressed="true"]{
+    background:linear-gradient(180deg,#a70b13 0%,#7f0e15 100%);
+    border-color:#6d0b11;
+    color:#fff;
+  }
 
   .note{margin-top:8px;font-size:13px;color:#7a0f16;font-weight:700}
 
@@ -291,49 +317,6 @@
     color:#e3e6ef;
   }
 
-  /* Payment access gate */
-  #accessGate{
-    position:fixed;
-    inset:0;
-    display:none;
-    z-index:10000;
-    background:rgba(12,14,18,.78);
-    backdrop-filter:blur(3px);
-    color:#f6f7fb;
-    place-items:center;
-    padding:24px;
-  }
-  #accessGate.active{display:grid;}
-  .gate-card{
-    width:min(560px,92vw);
-    background:#14161b;
-    border:1px solid #2b2f38;
-    border-radius:18px;
-    padding:22px 24px;
-    box-shadow:0 24px 60px rgba(0,0,0,.5);
-  }
-  .gate-title{margin:0 0 8px;font-size:20px;letter-spacing:.2px}
-  .gate-msg{margin:0 0 14px;color:#c8cbd6;font-size:14px}
-  .gate-timer{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:#c03b41;background:#1b1d24;border:1px solid #2f333d;border-radius:999px;padding:6px 10px;margin-bottom:14px}
-  .gate-actions{display:flex;gap:10px;flex-wrap:wrap}
-  .gate-btn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    border:none;
-    border-radius:999px;
-    padding:10px 16px;
-    background:#c03b41;
-    color:#fff;
-    cursor:pointer;
-    text-decoration:none;
-    font-weight:600;
-  }
-  .gate-btn.secondary{
-    background:transparent;
-    border:1px solid #3a3f4c;
-    color:#e3e6ef;
-  }
 
 
 
@@ -379,6 +362,62 @@
   .util-toggle-btn.active,
   .util-toggle-btn:active{ background:#e9ebef; box-shadow:inset 0 0 0 1px rgba(0,0,0,.08); }
 
+  /* Street View panel */
+  #streetViewPane{
+    position:absolute;
+    top:12px;
+    right:12px;
+    bottom:12px;
+    width:min(42vw,520px);
+    min-width:320px;
+    background:#0f1116;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:12px;
+    box-shadow:0 12px 32px rgba(12,14,18,.35);
+    overflow:hidden;
+    display:none;
+    z-index:7;
+  }
+  #streetViewPane.active{ display:block; }
+  #streetViewHeader{
+    height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:0 10px;
+    color:#fff;
+    font-weight:700;
+    font-size:13px;
+    letter-spacing:.2px;
+    background:linear-gradient(90deg,#12151b,#0b0d12);
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  #streetViewClose{
+    border:none;
+    background:rgba(255,255,255,.12);
+    color:#fff;
+    border-radius:999px;
+    padding:6px 10px;
+    font-size:12px;
+    cursor:pointer;
+  }
+  #streetViewClose:hover{ background:rgba(255,255,255,.2); }
+  #streetViewViewer{ position:absolute; inset:44px 0 0 0; }
+  #streetViewStatus{
+    position:absolute;
+    left:10px;
+    right:10px;
+    bottom:10px;
+    padding:8px 10px;
+    font-size:12px;
+    color:#f4f6fb;
+    background:rgba(10,12,16,.65);
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:10px;
+    pointer-events:none;
+  }
+  #streetViewStatus.error{ color:#ffd8d8; border-color:rgba(255,127,127,.35); }
+
 </style>
 
 <link rel="stylesheet" href="map-theme.css">
@@ -392,6 +431,7 @@
     <div class="toolbar">
       <button id="btnHome" class="btn linklike" title="Back to index">Home</button>
       <button id="btnPrintReport" class="btn">Print Report</button>
+      <button id="btnStreetView" class="btn">Street View</button>
     </div>
   </header>
 
@@ -498,6 +538,15 @@
 
       <div id="loadingMask"><div class="spinner" aria-label="Loading…"></div></div>
 
+      <section id="streetViewPane" aria-hidden="true">
+        <div id="streetViewHeader">
+          <span>Google Street View</span>
+          <button id="streetViewClose" type="button">Close</button>
+        </div>
+        <div id="streetViewViewer"></div>
+        <div id="streetViewStatus">Street View ready. Add your Google Maps API key to enable imagery.</div>
+      </section>
+
     </div>
 
   </main>
@@ -524,8 +573,6 @@
       </div>
     </div>
   </div>
-
-
 
   <div id="rptOverlay" aria-hidden="true">
 
@@ -610,6 +657,7 @@
     import * as reactiveUtils from "https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js";
 
     import * as geometryEngine from "https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js";
+    import * as webMercatorUtils from "https://js.arcgis.com/4.30/@arcgis/core/geometry/support/webMercatorUtils.js";
 
     import * as symbolUtils from "https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js";
 
@@ -630,6 +678,8 @@
     const BRISBANE=[153.0251,-27.4698];
 
     const M2="m²";
+
+    const GOOGLE_MAPS_API_KEY = "";
 
     const QUERY_TIMEOUT_MS = 3000;       // cap slow overlay queries
     const SUMMARY_QUERY_TIMEOUT_MS = 8000; // more time for sidebar overlay summary
@@ -766,6 +816,122 @@
     });
 
     const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+    /* ---------------- Street View (Google) ---------------- */
+    const streetViewPane = $("streetViewPane");
+    const streetViewStatus = $("streetViewStatus");
+    const streetViewClose = $("streetViewClose");
+    const streetViewBtn = $("btnStreetView");
+    let streetViewPanorama = null;
+    let streetViewService = null;
+    let streetViewReady = false;
+    const isStreetViewOpen = ()=> !!streetViewPane?.classList.contains("active");
+
+    const setStreetViewStatus = (msg, isError=false)=>{
+      if(!streetViewStatus) return;
+      streetViewStatus.textContent = msg;
+      streetViewStatus.classList.toggle("error", !!isError);
+    };
+
+    const toLatLng = (mapPoint)=>{
+      if(!mapPoint) return null;
+      try{
+        const g = webMercatorUtils.webMercatorToGeographic(mapPoint) || mapPoint;
+        const lat = g?.latitude ?? g?.y;
+        const lng = g?.longitude ?? g?.x;
+        if(typeof lat !== "number" || typeof lng !== "number") return null;
+        return { lat, lng };
+      }catch{
+        return null;
+      }
+    };
+
+    const loadGoogleMaps = ()=>{
+      if(window.google?.maps) return Promise.resolve(true);
+      if(!GOOGLE_MAPS_API_KEY){
+        setStreetViewStatus("Set GOOGLE_MAPS_API_KEY in BCC.html to enable Street View.", true);
+        return Promise.resolve(false);
+      }
+      return new Promise((resolve, reject)=>{
+        const existing = document.querySelector("script[data-google-maps]");
+        if(existing){
+          existing.addEventListener("load", ()=>resolve(true), { once:true });
+          existing.addEventListener("error", reject, { once:true });
+          return;
+        }
+        const s = document.createElement("script");
+        s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}&v=weekly`;
+        s.async = true;
+        s.defer = true;
+        s.dataset.googleMaps = "1";
+        s.onload = ()=>resolve(true);
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    };
+
+    const ensureStreetView = async ()=>{
+      if(streetViewReady && streetViewPanorama && streetViewService) return true;
+      const ok = await loadGoogleMaps().catch(err=>{
+        setStreetViewStatus(err?.message || "Failed to load Google Maps.", true);
+        return false;
+      });
+      if(!ok) return false;
+      try{
+        streetViewPanorama = new google.maps.StreetViewPanorama(
+          document.getElementById("streetViewViewer"),
+          {
+            disableDefaultUI: false,
+            showRoadLabels: true,
+            addressControl: true
+          }
+        );
+        streetViewService = new google.maps.StreetViewService();
+        streetViewReady = true;
+        setStreetViewStatus("Street View loaded.");
+        return true;
+      }catch(err){
+        setStreetViewStatus(err?.message || "Street View failed to initialize.", true);
+        return false;
+      }
+    };
+
+    const setStreetViewVisible = async (open)=>{
+      if(!streetViewPane) return;
+      streetViewPane.classList.toggle("active", !!open);
+      streetViewPane.setAttribute("aria-hidden", open ? "false" : "true");
+      if(open){
+        const ok = await ensureStreetView();
+        if(ok){
+          setTimeout(()=> google?.maps?.event?.trigger?.(streetViewPanorama, "resize"), 0);
+          const center = toLatLng(view?.center);
+          if(center) updateStreetView(center, 60);
+        }
+      }
+    };
+
+    const updateStreetView = (latLng, radius=50)=>{
+      if(!streetViewService || !streetViewPanorama || !latLng) return;
+      streetViewService.getPanorama(
+        { location: latLng, radius },
+        (data, status)=>{
+          if(status === "OK" && data?.location?.pano){
+            streetViewPanorama.setPano(data.location.pano);
+            streetViewPanorama.setPov({ heading: 0, pitch: 0 });
+            setStreetViewStatus("Street View updated.");
+          }else{
+            setStreetViewStatus("No Street View imagery near this location.", true);
+          }
+        }
+      );
+    };
+
+    streetViewBtn?.addEventListener("click", ()=>{
+      const open = !streetViewPane?.classList.contains("active");
+      setStreetViewVisible(open);
+    });
+    streetViewClose?.addEventListener("click", ()=> setStreetViewVisible(false));
+    window.addEventListener("resize", ()=> google?.maps?.event?.trigger?.(streetViewPanorama, "resize"));
 
     const waitViewIdle=async(extra=80)=>{
 
@@ -2249,11 +2415,27 @@
 
 
 
-    async function resolveBestAddress(geom, parcelFeature){
+    function isLikelyStreetAddress(s){
+      if(!s) return false;
+      const v = String(s).trim();
+      if(!v) return false;
+      return /\b\d{1,5}\s+[A-Za-z][A-Za-z\s.'-]+(?:\b(St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Cres|Court|Ct|Lane|Ln|Terrace|Ter|Way|Pde|Parade)\b)/i.test(v);
+    }
+
+    async function resolveBestAddress(geom, parcelFeature, hintAddress){
 
       let addr = parcelFeature ? parseAddress(parcelFeature.attributes||{}) : null;
 
-      const weak = !addr || addr.trim().length<=4 || /^[A-Z]{2,3}$/.test(addr.trim());
+      let weak = !addr || addr.trim().length<=4 || /^[A-Z]{2,3}$/.test(addr.trim()) || !isLikelyStreetAddress(addr);
+
+      const normAddr = s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+      if(hintAddress && isLikelyStreetAddress(hintAddress)){
+        const hint = String(hintAddress).trim();
+        if(!addr || normAddr(addr) !== normAddr(hint)){
+          addr = hint;
+          weak = false;
+        }
+      }
 
 
 
@@ -2558,13 +2740,58 @@
 
 
     // Side overlay summary (no utilities)
+    const sideOverlayIndex = new Map();
+    function isNodeVisible(node){
+      try{
+        if(node && "visible" in node) return !!node.visible;
+      }catch{}
+      return false;
+    }
+    function setOverlayVisibility(node, on){
+      if(!node) return;
+      try{ node.visible = !!on; }catch{}
+      if(on){
+        try{ node.listMode = "show"; }catch{}
+      }
+      let p = node.parent;
+      while(p){
+        if("visible" in p){ try{ p.visible = true; }catch{} }
+        p = p.parent;
+      }
+    }
+    function updateOverlayToggleButton(btn, node){
+      if(!btn) return;
+      const on = isNodeVisible(node);
+      btn.textContent = on ? "Hide" : "Show";
+      btn.setAttribute("aria-pressed", String(on));
+      btn.setAttribute("title", on ? "Hide overlay" : "Show overlay");
+    }
+    (function initSideOverlayToggle(){
+      const ul = $("sumOverlays");
+      if(!ul) return;
+      ul.addEventListener("click", (evt)=>{
+        const btn = evt.target.closest(".ov-toggle");
+        if(!btn) return;
+        evt.preventDefault();
+        const key = btn.getAttribute("data-ov-key");
+        if(!key) return;
+        const node = sideOverlayIndex.get(key);
+        if(!node) return;
+        const next = !isNodeVisible(node);
+        setOverlayVisibility(node, next);
+        updateOverlayToggleButton(btn, node);
+        try{ layerList.refresh(); }catch{}
+      });
+    })();
 
     async function updateSideOverlaySummary(geom){
       const ul = $("sumOverlays");
       if (!ul) return;
       ul.innerHTML = "<li><i>Scanning…</i></li>";
 
+      sideOverlayIndex.clear();
       const items = [];
+      let itemIdx = 0;
       const nodes = flattenFeatureNodes().filter(n=>{
         const t=n.title||"", id=n.id||"", tg=n.portalItem?.tags||[];
         const p=nodePath(n);
@@ -2634,9 +2861,13 @@
             }
           }
           const schemeHTML = schemeLink ? `<a href="${schemeLink}" target="_blank" rel="noopener" style="font-size:12px;text-decoration:none;margin-left:6px">Planning scheme</a>` : "";
+          const key = `ov-${itemIdx++}`;
+          sideOverlayIndex.set(key, n);
+          const isVisible = isNodeVisible(n);
+          const toggleHTML = `<button type="button" class="ov-toggle" data-ov-key="${key}" aria-pressed="${isVisible}">${isVisible ? "Hide" : "Show"}</button>`;
           items.push(
             `<li>
-               <div class="ov-title">${title} <span style="color:#777">(${cnt})</span>${schemeHTML}</div>
+               <div class="ov-title"><span class="ov-name">${title}</span> <span style="color:#777">(${cnt})</span>${schemeHTML}${toggleHTML}</div>
                ${keyHTML}
              </li>`
           );
@@ -2652,7 +2883,7 @@
 
 
 
-    async function focusOnParcelFeature(feat,{shouldZoom=false}={}){
+    async function focusOnParcelFeature(feat,{shouldZoom=false,hintAddress=null}={}){
 
       if(!feat || !feat.geometry) return;
 
@@ -2680,7 +2911,7 @@
 
       try{
 
-        const addr=await resolveBestAddress(geom, feat);
+        const addr=await resolveBestAddress(geom, feat, hintAddress);
 
         lastParcelInfo.addressText=addr||lastParcelInfo.addressText||"Address unavailable";
 
@@ -2741,6 +2972,11 @@
         lastReportTitle = "Property Report";
         const actions = $("rptActions");
         if(actions) actions.style.display = "none";
+
+        if(isStreetViewOpen()){
+          const ll = toLatLng(ev.mapPoint);
+          if(ll) updateStreetView(ll, 80);
+        }
 
         const parcel=await findParcelAtPoint(ev.mapPoint);
 
@@ -3817,7 +4053,7 @@
 
           setRpt("Resolving address…", 25);
 
-          try{ addressText=await resolveBestAddress(geom,lastParcelInfo.feature); }catch{}
+          try{ addressText=await resolveBestAddress(geom,lastParcelInfo.feature,lastParcelInfo.addressText); }catch{}
 
           setRpt("Address resolved", 35, "rptS2");
 
@@ -5185,10 +5421,15 @@ setRpt("Composing document…", 93);
       try{
 
         const feat = e.result && e.result.feature;
+        const hint = e?.result?.name
+          || e?.result?.feature?.attributes?.Match_addr
+          || e?.result?.feature?.attributes?.LongLabel
+          || e?.result?.feature?.attributes?.Address
+          || e?.result?.feature?.attributes?.address;
 
         if(feat && feat.geometry){
 
-          await focusOnParcelFeature(feat);
+          await focusOnParcelFeature(feat,{hintAddress:hint});
 
         }
 

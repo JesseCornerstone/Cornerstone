@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Cabin:wght@400;500;600;700&display=swap");
-
 :root {
   --map-bg: #111214;
   --map-panel: #1b1c20;
@@ -21,7 +19,7 @@ html,
 body {
   background: var(--map-bg);
   color: var(--map-ink);
-  font-family: "Cabin", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif;
   min-height: 100%;
 }
 
@@ -354,7 +352,7 @@ aside#left {
 
 .esri-widget__heading,
 .esri-popup__header-title {
-  font-family: "Cabin", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-family: "Aptos", "Segoe UI", Arial, sans-serif !important;
   color: #ffffff !important;
 }
 

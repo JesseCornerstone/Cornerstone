@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lot-wise-static-v15';
+const CACHE_NAME = 'lot-wise-static-v16';
 const PRECACHE_URLS = [
   '/',
   '/Index.html',

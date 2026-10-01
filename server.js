@@ -11,8 +11,18 @@ const pdfParse = require('pdf-parse');
 const fetch = require('node-fetch');
 const compression = require('compression');
 const Stripe = require('stripe');
+const { createVaApiAuth } = require('./src/va/auth');
+const { VaJobStore } = require('./src/va/job-store');
+const { createVaRouter } = require('./src/va/routes');
 
 const app = express();
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const SESSION_SECRET = (process.env.SESSION_SECRET || '').trim();
+const TOKEN_ISSUER_API_KEY = (process.env.TOKEN_ISSUER_API_KEY || '').trim();
+
+if (IS_PRODUCTION && SESSION_SECRET.length < 32) {
+  throw new Error('SESSION_SECRET must be set to at least 32 characters in production.');
+}
 
 // ---------- DB CONFIG (Azure SQL) ----------
 const dbConfig = {
@@ -43,8 +53,7 @@ async function getPool() {
 
 // Where BCC.html lives (we append ?key=... to this)
 const REPORT_BASE_URL =
-  process.env.REPORT_BASE_URL ||
-  'https://cornerstoneplus-hqhferewfdhsh4b0.australiaeast-01.azurewebsites.net/BCC.html';
+  (process.env.REPORT_BASE_URL || '').trim();
 const PAYMENT_URL = (process.env.PAYMENT_URL || '').trim();
 const APP_BASE_URL = (process.env.APP_BASE_URL || '').trim();
 const STRIPE_SECRET_KEY = (process.env.STRIPE_SECRET_KEY || '').trim();
@@ -56,6 +65,12 @@ const ENABLE_POD_ARCGIS = process.env.ENABLE_POD_ARCGIS === 'true';
 const DEV_I_BASE =
   process.env.DEV_I_BASE ||
   'https://developmenti.brisbane.qld.gov.au';
+const VA_STORAGE_DIR =
+  process.env.VA_STORAGE_DIR || path.join(__dirname, 'storage');
+const vaJobStore = new VaJobStore({
+  storageDir: VA_STORAGE_DIR,
+  reportsDir: path.join(VA_STORAGE_DIR, 'reports')
+});
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -64,22 +79,46 @@ const upload = multer({
 });
 
 // ---------- MIDDLEWARE ----------
-app.use(cors()); // allow all origins (easy for Squarespace + testing)
-app.use(express.json());
+app.disable('x-powered-by');
+if (IS_PRODUCTION) app.set('trust proxy', 1);
+
+const allowedOrigins = (process.env.FRONTEND_ORIGIN || '')
+  .split(',')
+  .map(value => value.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+    credentials: true
+  })
+);
+app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 // Compress responses to speed up asset delivery (especially map JS/CSS)
 app.use(compression());
+app.use((req, res, next) => {
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  next();
+});
 
 app.use(
   session({
-    name: 'cs_sess',
-    secret: process.env.SESSION_SECRET || 'change-me-in-prod',
+    name: 'lot_wise_sess',
+    secret: SESSION_SECRET || 'local-development-only-session-secret',
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
       sameSite: process.env.COOKIE_SAME_SITE || 'lax',
-      secure: process.env.COOKIE_SECURE === 'true'
+      secure:
+        process.env.COOKIE_SECURE === undefined
+          ? IS_PRODUCTION
+          : process.env.COOKIE_SECURE === 'true'
     }
   })
 );
@@ -109,8 +148,19 @@ function generateToken(byteLength = 32) {
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const tokenStore = new Map();
+const paymentTokenIndex = new Map();
 
 function createInMemoryToken(email, paymentId) {
+  const paymentKey = String(paymentId || '').trim();
+  if (paymentKey && paymentTokenIndex.has(paymentKey)) {
+    const existingToken = paymentTokenIndex.get(paymentKey);
+    return {
+      token: existingToken,
+      record: tokenStore.get(existingToken) || null,
+      duplicate: true
+    };
+  }
+
   const token = generateToken(32);
   const now = Date.now();
   const expiresAt = now + TOKEN_TTL_MS;
@@ -123,7 +173,8 @@ function createInMemoryToken(email, paymentId) {
     used: false,
     usedAt: null
   });
-  return { token, expiresAt };
+  if (paymentKey) paymentTokenIndex.set(paymentKey, token);
+  return { token, expiresAt, record: tokenStore.get(token), duplicate: false };
 }
 
 function getTokenRecord(token) {
@@ -140,11 +191,40 @@ function getTokenRecord(token) {
 function markTokenUsed(token) {
   const rec = getTokenRecord(token);
   if (!rec || rec.expired) return null;
-  if (rec.used) return rec;
+  if (rec.used) return null;
   rec.used = true;
   rec.usedAt = Date.now();
-  tokenStore.set(token, rec);
   return rec;
+}
+
+function safeStringEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''), 'utf8');
+  const rightBuffer = Buffer.from(String(right || ''), 'utf8');
+  if (leftBuffer.length !== rightBuffer.length) return false;
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function tokenIssuerKeyFromRequest(req) {
+  const headerKey = req.get('x-api-key');
+  if (headerKey) return headerKey.trim();
+  const authorization = req.get('authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function requireTokenIssuerKey(req, res, next) {
+  if (!TOKEN_ISSUER_API_KEY) {
+    return res.status(503).json({
+      ok: false,
+      error: 'Token issuing is not configured.'
+    });
+  }
+
+  if (!safeStringEqual(tokenIssuerKeyFromRequest(req), TOKEN_ISSUER_API_KEY)) {
+    return res.status(401).json({ ok: false, error: 'Unauthorized.' });
+  }
+
+  return next();
 }
 
 setInterval(() => {
@@ -164,7 +244,7 @@ function getBaseUrl(req) {
 function sanitizeReturnPath(value, fallback = 'BCC.html') {
   if (!value || typeof value !== 'string') return fallback;
   if (value.includes('://')) return fallback;
-  let cleaned = value.replace(/^\/+/, '');
+  const cleaned = value.replace(/^\/+/, '');
   if (!/^[A-Za-z0-9._-]+\.html$/.test(cleaned)) return fallback;
   return cleaned;
 }
@@ -203,7 +283,7 @@ function parseSubdivisionsFromText(text) {
   const planRegex = /\b((?:SP|RP|CP|BUP|SL|DP|SPRP)\s*-?\s*\d+)\b/i;
   const lotRegex = /\b(?:lot|lot\s*no\.?)\s*[:#-]?\s*([0-9A-Za-z-]+)\b/i;
   const areaRegex =
-    /(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(?:m2|sqm|square metres?|mA�)/i;
+    /(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*(?:m(?:2|²)|sqm|square metres?)/i;
 
   lines.forEach(line => {
     const normalised = line.replace(/\s+/g, ' ');
@@ -290,7 +370,7 @@ async function pushSubdivisionsToArcGis(subdivisions, meta = {}) {
   let arcgisJson = {};
   try {
     arcgisJson = await arcgisResp.json();
-  } catch (err) {
+  } catch {
     throw new Error('ArcGIS response was not JSON');
   }
 
@@ -315,14 +395,14 @@ process.on('uncaughtException', err => {
 
 // ---------- BASIC / AUTH ROUTES ----------
 
-// Simple ping to confirm app is running
+// Lightweight liveness endpoint.
 app.get('/api/ping', (req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
-// Health check - just returns ok (no DB)
+// Health check does not require a database connection.
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true });
+  res.json({ ok: true, service: 'lot-wise-application' });
 });
 
 // Current user
@@ -467,7 +547,7 @@ app.post('/api/auth/logout', (req, res) => {
       console.error('Logout error', err);
       return res.status(500).json({ ok: false, error: 'Server error' });
     }
-    res.clearCookie('cs_sess');
+    res.clearCookie('lot_wise_sess');
     return res.json({ ok: true });
   });
 });
@@ -476,22 +556,40 @@ app.post('/api/auth/logout', (req, res) => {
 
 // Create token from Squarespace order
 // Body: { "email": "user@example.com", "orderId": "SQUARESPACE-ORDER-ID" }
-app.post('/api/create-token', async (req, res) => {
+// Header: x-api-key: <TOKEN_ISSUER_API_KEY>
+app.post('/api/create-token', requireTokenIssuerKey, async (req, res) => {
   try {
     const { email, orderId } = req.body || {};
-    console.log('🔑 /api/create-token hit with:', email, orderId);
+    const normalisedEmail = String(email || '').trim().toLowerCase();
+    const normalisedOrderId = String(orderId || '').trim();
 
-    if (!email || !orderId) {
-      return res.status(400).send('Missing email or orderId.');
+    if (
+      !normalisedEmail ||
+      normalisedEmail.length > 254 ||
+      !normalisedOrderId ||
+      normalisedOrderId.length > 200
+    ) {
+      return res.status(400).json({
+        ok: false,
+        error: 'A valid email and orderId are required.'
+      });
     }
 
-    const { token } = createInMemoryToken(email, orderId);
+    const issued = createInMemoryToken(normalisedEmail, normalisedOrderId);
+    if (issued.duplicate) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Access has already been issued for this order.'
+      });
+    }
 
-    const sep = REPORT_BASE_URL.includes('?') ? '&' : '?';
-    const reportUrl = `${REPORT_BASE_URL}${sep}key=${token}`;
+    const reportBaseUrl =
+      REPORT_BASE_URL || `${getBaseUrl(req)}/BCC.html`;
+    const sep = reportBaseUrl.includes('?') ? '&' : '?';
+    const reportUrl = `${reportBaseUrl}${sep}key=${issued.token}`;
 
-    console.log('🔗 Report URL:', reportUrl);
-    return res.json({ reportUrl });
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ ok: true, reportUrl });
   } catch (err) {
     console.error('Error in /api/create-token:', err);
     return res.status(500).send('Failed to create token.');
@@ -502,8 +600,9 @@ app.post('/api/create-token', async (req, res) => {
 // GET /api/check-token?key=...
 app.get('/api/check-token', async (req, res) => {
   try {
-    const key = req.query.key;
-    if (!key) {
+    const key = String(req.query.key || '').trim();
+    res.setHeader('Cache-Control', 'no-store');
+    if (!key || key.length > 256) {
       return res.status(400).json({ ok: false, error: 'Missing key.' });
     }
 
@@ -532,15 +631,15 @@ app.get('/api/check-token', async (req, res) => {
 // POST /api/finalise-token?key=...
 app.post('/api/finalise-token', async (req, res) => {
   try {
-    const key = req.query.key;
-    console.log('🧹 /api/finalise-token hit with:', key);
+    const key = String(req.query.key || '').trim();
+    res.setHeader('Cache-Control', 'no-store');
 
-    if (!key) {
+    if (!key || key.length > 256) {
       return res.status(400).send('Missing key.');
     }
 
     const rec = markTokenUsed(key);
-    if (!rec || rec.expired || rec.used) {
+    if (!rec || rec.expired) {
       return res
         .status(400)
         .send('This report link is invalid, expired, or already used.');
@@ -555,6 +654,7 @@ app.post('/api/finalise-token', async (req, res) => {
 
 // Payment link config (optional)
 app.get('/api/payment-config', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   return res.json({ paymentUrl: PAYMENT_URL || null });
 });
 
@@ -623,15 +723,18 @@ app.get('/api/stripe/success', async (req, res) => {
 
     const email =
       session.customer_details?.email || session.customer_email || null;
-    const { token } = createInMemoryToken(email, session.id);
+    const issued = createInMemoryToken(email, session.id);
+    if (!issued.token || !issued.record) {
+      return res.redirect(303, `${baseUrl}/${returnPath}`);
+    }
 
-    const sep = returnPath.includes('?') ? '&' : '?';
-    return res.redirect(303, `${baseUrl}/${returnPath}${sep}key=${token}`);
+    return res.redirect(
+      303,
+      `${baseUrl}/${returnPath}?key=${encodeURIComponent(issued.token)}`
+    );
   } catch (err) {
     console.error('Stripe success error:', err);
-    const detail =
-      (err && (err.message || err.type || err.code)) ? ` ${err.message || err.type || err.code}` : '';
-    return res.status(500).send(`Failed to finalise payment.${detail}`);
+    return res.status(500).send('Failed to finalise payment.');
   }
 });
 
@@ -717,7 +820,7 @@ app.get('/api/dev-i/search', async (req, res) => {
   try {
     const upstream = await fetch(upstreamUrl, {
       headers: {
-        'User-Agent': 'CornerstoneMapping/1.0 (+https://cornerstonebc.com.au)'
+        'User-Agent': 'LotCompanionMapping/1.0'
       }
     });
     const text = await upstream.text();
@@ -737,6 +840,18 @@ app.get('/api/dev-i/search', async (req, res) => {
   }
 });
 
+// ---------- VISUAL APPROVALS / VA INTEGRATION ----------
+
+app.use(
+  '/__va-report-ui',
+  express.static(path.join(__dirname, 'public'), {
+    etag: true,
+    index: false,
+    maxAge: 0
+  })
+);
+app.use('/api/va', createVaApiAuth(), createVaRouter({ store: vaJobStore, getBaseUrl }));
+
 // ---------- STATIC FRONT-END ----------
 
 // Serve everything from /public (e.g. BCC.html, index.html, etc.)
@@ -745,8 +860,14 @@ app.use(
     maxAge: '30d', // cache static assets aggressively
     etag: true,
     setHeaders: (res, filePath) => {
-      if (filePath.endsWith('.html')) {
-        // keep HTML uncached so updates ship immediately
+      const normalisedPath = filePath.replace(/\\/g, '/');
+      if (
+        filePath.endsWith('.html') ||
+        normalisedPath.endsWith('/public/theme.js') ||
+        normalisedPath.endsWith('/public/file-protocol-guard.js') ||
+        normalisedPath.includes('/public/Js/')
+      ) {
+        // keep HTML and page-brain modules uncached so updates ship immediately
         res.setHeader('Cache-Control', 'no-cache');
       }
     }
@@ -755,5 +876,5 @@ app.use(
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Cornerstone auth + token API listening on port ${PORT}`);
+  console.log(`Lot Companion application service listening on port ${PORT}`);
 });

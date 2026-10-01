@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Preliminary visual assessment of residential design and siting against the pending Queensland Housing Code.">
+  <link rel="icon" type="image/png" sizes="512x512" href="./images/lot-companion-icon.png?v=20260828">
+  <title>Lot Companion | QHC Compliance Studio</title>
+  <link rel="stylesheet" href="https://js.arcgis.com/4.30/@arcgis/core/assets/esri/themes/light/main.css">
+  <link rel="stylesheet" href="./theme.css">
+  <link rel="stylesheet" href="./qhc-studio.css?v=20260807">
+</head>
+<body class="qhc-page">
+  <div class="qhc-shell">
+    <header class="qhc-topbar">
+      <div class="qhc-brand">
+        <a href="Index.html" aria-label="Lot Companion home"><img src="./images/lot-companion-logo-white.png" alt="Lot Companion"></a>
+        <span class="qhc-brand-divider" aria-hidden="true"></span>
+        <div class="qhc-brand-copy"><strong>QHC Compliance Studio</strong><span>3D design &amp; siting review</span></div>
+      </div>
+      <div class="qhc-top-status">
+        <span class="code-pill">Pending code · proposed 1 Sep 2026</span>
+        <span class="top-project" id="topProject">Untitled preliminary assessment</span>
+      </div>
+      <div class="top-actions">
+        <button class="top-btn" id="saveDraft" type="button" title="Save this assessment in this browser"><span>Save draft</span></button>
+        <button class="top-btn" id="printReport" type="button" title="Print or save a PDF report"><span>Export report</span></button>
+        <a class="top-btn" href="Index.html" title="Back to council mapping"><span>Exit</span></a>
+      </div>
+    </header>
+
+    <main class="studio-grid">
+      <aside class="control-panel" aria-label="Assessment inputs">
+        <div class="panel-head">
+          <span class="eyebrow">Preliminary assessment</span>
+          <h1>Model the proposal</h1>
+          <p>Position the building, confirm the site context, then resolve every amber item.</p>
+        </div>
+
+        <div class="step-list">
+          <section class="step-card open">
+            <button class="step-toggle" type="button" aria-expanded="true">
+              <span class="step-number">1</span><span>Project &amp; location</span><span class="step-chevron">⌄</span>
+            </button>
+            <div class="step-body">
+              <div class="field"><label for="projectName">Project name / reference</label><input id="projectName" value="New dwelling — concept review"></div>
+              <div class="field"><label for="council">Local government</label>
+                <select id="council">
+                  <option value="">Select council</option>
+                  <option>Brisbane City Council</option><option>City of Gold Coast</option><option>Fraser Coast Regional Council</option>
+                  <option>Gympie Regional Council</option><option>Ipswich City Council</option><option>Logan City Council</option>
+                  <option>City of Moreton Bay</option><option>Noosa Shire Council</option><option>Redland City Council</option>
+                  <option>Scenic Rim Regional Council</option><option>Sunshine Coast Council</option><option>Toowoomba Regional Council</option>
+                  <option>Other Queensland council</option>
+                </select>
+              </div>
+              <div class="field"><label for="address">Address or latitude, longitude</label>
+                <div class="search-row"><input id="address" value="Brisbane QLD" placeholder="Search a Queensland address"><button class="primary-btn" id="searchAddress" type="button">Locate</button></div>
+              </div>
+              <div class="field"><label for="lotPlan">Lot / plan (optional)</label>
+                <div class="search-row"><input id="lotPlan" placeholder="e.g. Lot 19 RP90746"><button class="secondary-btn" id="searchLotPlan" type="button">Find</button></div>
+              </div>
+              <div id="locateStatus" class="locate-status">The model is currently placed on the Brisbane sample site.</div>
+              <div class="button-row"><button class="secondary-btn" id="sampleSite" type="button">Reset sample</button><button class="secondary-btn" id="compliantExample" type="button">Compliant example</button></div>
+            </div>
+          </section>
+
+          <section class="step-card open">
+            <button class="step-toggle" type="button" aria-expanded="true">
+              <span class="step-number">2</span><span>QHC scope</span><span class="step-chevron">⌄</span>
+            </button>
+            <div class="step-body">
+              <p class="step-note">The QHC has a transition period. These confirmations determine whether the result can move beyond “needs review”.</p>
+              <div class="field"><span class="field-label">Council has adopted the applicable QHC provisions</span>
+                <select id="councilAdoption"><option value="unknown">Not confirmed</option><option value="yes">Confirmed</option><option value="no">Not adopted / current provisions apply</option></select>
+              </div>
+              <div class="field"><span class="field-label">Dwelling house is a permitted use in the zone</span>
+                <select id="dwellingPermitted"><option value="unknown">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option></select>
+              </div>
+              <div class="field"><span class="field-label">Priority development area</span>
+                <select id="priorityDevelopmentArea"><option value="no">No</option><option value="unknown">Not confirmed</option><option value="yes">Yes — QHC does not apply</option></select>
+              </div>
+              <div class="field-row">
+                <div class="field"><span class="field-label">Relevant overlays</span><select id="overlayChecked"><option value="unknown">Not reviewed</option><option value="yes">Reviewed / applied</option><option value="no">Conflict found</option></select></div>
+                <div class="field"><span class="field-label">Plan of development</span><select id="planOfDevelopmentChecked"><option value="unknown">Not reviewed</option><option value="yes">Reviewed / applied</option><option value="no">Requires review</option></select></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="step-card open">
+            <button class="step-toggle" type="button" aria-expanded="true">
+              <span class="step-number">3</span><span>Lot model</span><span class="step-chevron">⌄</span>
+            </button>
+            <div class="step-body">
+              <p class="step-note">Use the effective lot area excluding any battle-axe access handle. The frontage is the lower edge of the blue model.</p>
+              <div class="field-row">
+                <div class="field"><label for="lotWidth">Lot width</label><div class="input-with-unit"><input id="lotWidth" type="number" min="1" step="0.1" value="12.5"><span>m</span></div></div>
+                <div class="field"><label for="lotDepth">Lot depth</label><div class="input-with-unit"><input id="lotDepth" type="number" min="1" step="0.1" value="32"><span>m</span></div></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="slope">Lot slope</label><div class="input-with-unit"><input id="slope" type="number" min="0" step="0.5" value="2"><span>%</span></div></div>
+                <div class="field"><label for="lotBearing">Frontage bearing</label><div class="input-with-unit"><input id="lotBearing" type="number" min="-180" max="180" step="1" value="0"><span>°</span></div></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="frontageType">Primary frontage</label><select id="frontageType"><option value="road">Road / other</option><option value="laneway">Laneway</option><option value="parkway">Parkway</option></select></div>
+                <div class="field"><span class="field-label">Calculated lot area</span><div class="derived-value" id="lotAreaDisplay">400.0 m²</div></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="step-card open">
+            <button class="step-toggle" type="button" aria-expanded="true">
+              <span class="step-number">4</span><span>Building &amp; position</span><span class="step-chevron">⌄</span>
+            </button>
+            <div class="step-body">
+              <div class="field"><label for="proposalType">Building type</label>
+                <select id="proposalType"><option value="primary">Primary dwelling (Class 1 / eligible Class 2)</option><option value="secondary">Detached secondary dwelling</option><option value="class10a">Garage, carport or shed (Class 10a)</option></select>
+              </div>
+              <div class="field" id="class10SubtypeField" hidden><label for="class10Subtype">Class 10a type</label><select id="class10Subtype"><option value="garage">Garage</option><option value="carport">Eligible carport</option><option value="shed">Detached shed / laundry</option></select></div>
+              <div class="field-row">
+                <div class="field"><label for="buildingWidth">Building width</label><div class="input-with-unit"><input id="buildingWidth" type="number" min="1" step="0.1" value="9"><span>m</span></div></div>
+                <div class="field"><label for="buildingDepth">Building depth</label><div class="input-with-unit"><input id="buildingDepth" type="number" min="1" step="0.1" value="18"><span>m</span></div></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><label for="height">Overall height</label><div class="input-with-unit"><input id="height" type="number" min="1" step="0.1" value="7.5"><span>m</span></div></div>
+                <div class="field"><label for="storeys">Storeys</label><input id="storeys" type="number" min="1" max="3" step="1" value="2"></div>
+              </div>
+              <div class="field" id="meanHeightField" hidden><label for="meanHeight">Mean height (eligible carport)</label><div class="input-with-unit"><input id="meanHeight" type="number" min="1" step="0.1" value="3.5"><span>m</span></div></div>
+              <div class="field-row">
+                <div class="field"><label for="frontSetback">Front setback</label><div class="input-with-unit"><input id="frontSetback" type="number" min="-5" step="0.1" value="3"><span>m</span></div></div>
+                <div class="field"><label for="leftSetback">Left setback</label><div class="input-with-unit"><input id="leftSetback" type="number" min="-5" step="0.1" value="1.5"><span>m</span></div></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><span class="field-label">Derived right setback</span><div class="derived-value" id="rightSetbackDisplay">2.0 m</div></div>
+                <div class="field"><span class="field-label">Derived rear setback</span><div class="derived-value" id="rearSetbackDisplay">11.0 m</div></div>
+              </div>
+              <div class="field"><label for="otherSiteCover">Other buildings / roofed area on lot</label><div class="input-with-unit"><input id="otherSiteCover" type="number" min="0" step="1" value="0"><span>m²</span></div></div>
+            </div>
+          </section>
+
+          <section class="step-card">
+            <button class="step-toggle" type="button" aria-expanded="false">
+              <span class="step-number">5</span><span>Parking &amp; open space</span><span class="step-chevron">⌄</span>
+            </button>
+            <div class="step-body">
+              <div id="dwellingAmenityFields">
+                <div class="field"><span class="field-label">A secondary dwelling is also on the lot</span><select id="hasSecondaryDwelling"><option value="no">No</option><option value="yes">Yes</option></select></div>
+                <div class="field-row">
+                  <div class="field"><label for="parkingSpaces">Total parking spaces</label><input id="parkingSpaces" type="number" min="0" step="1" value="2"></div>
+                  <div class="field"><label for="coveredParkingSpaces">Covered spaces</label><input id="coveredParkingSpaces" type="number" min="0" step="1" value="1"></div>
+                </div>
+                <div class="field"><span class="field-label">All parking spaces meet AS 2890.1 or QHC Table 5 dimensions</span><select id="parkingDimensions"><option value="unknown">Not confirmed</option><option value="yes" selected>Confirmed</option><option value="no">No</option></select></div>
+                <div class="field-row">
+                  <div class="field"><label for="garageAccessWidth">Garage / carport access</label><div class="input-with-unit"><input id="garageAccessWidth" type="number" min="0" step="0.1" value="4.8"><span>m</span></div></div>
+                  <div class="field"><span class="field-label">Upper floor overhang ≥0.5m</span><select id="garageOverhang"><option value="no">No</option><option value="yes">Yes</option></select></div>
+                </div>
+                <div class="field-row">
+                  <div class="field"><label for="posWidth">Private open-space width</label><div class="input-with-unit"><input id="posWidth" type="number" min="0" step="0.1" value="3"><span>m</span></div></div>
+                  <div class="field"><label for="posDepth">Private open-space depth</label><div class="input-with-unit"><input id="posDepth" type="number" min="0" step="0.1" value="5"><span>m</span></div></div>
+                </div>
+                <div class="field-row">
+                  <div class="field"><label for="posOpenSkyArea">Area open to sky</label><div class="input-with-unit"><input id="posOpenSkyArea" type="number" min="0" step="0.5" value="7.5"><span>m²</span></div></div>
+                  <div class="field"><label for="posSlope">Open-space slope</label><div class="input-with-unit"><input id="posSlope" type="number" min="0" step="0.5" value="2"><span>%</span></div></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="step-card">
+            <button class="step-toggle" type="button" aria-expanded="false">
+              <span class="step-number">6</span><span>Manual design review</span><span class="step-chevron">⌄</span>
+            </button>
+            <div class="step-body">
+              <div class="field"><span class="field-label">Windows or elevated outdoor areas trigger A5 privacy controls</span><select id="privacyTrigger"><option value="unknown">Not reviewed</option><option value="no">No trigger</option><option value="yes">Yes</option></select></div>
+              <div class="field"><span class="field-label">Required privacy fence, sill, obscure glazing or screen is provided</span><select id="privacySolution"><option value="unknown">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option></select></div>
+              <div class="field"><span class="field-label">Walls within 750mm are maintenance-free</span><select id="maintenanceFree"><option value="unknown">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option></select></div>
+              <div class="field"><span class="field-label">Entry is identifiable from the frontage</span><select id="visibleEntry"><option value="unknown">Not confirmed</option><option value="yes">Yes</option><option value="no">No</option></select></div>
+            </div>
+          </section>
+        </div>
+      </aside>
+
+      <section class="map-stage" aria-label="Interactive 3D compliance model">
+        <div id="viewDiv"></div>
+        <div class="fallback-scene review" id="fallbackScene" aria-label="Three-dimensional compliance preview">
+          <div class="fallback-caption"><span></span><strong>Preparing live 3D map</strong></div>
+          <div class="fallback-compass">N</div>
+          <div class="fallback-world">
+            <div class="fallback-lot">
+              <div class="fallback-frontage">PRIMARY FRONTAGE</div>
+              <div class="fallback-envelope"></div>
+              <div class="fallback-pos"></div>
+              <div class="fallback-building"><span>PROPOSAL</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="map-gradient"></div>
+        <div class="map-toolbar">
+          <button class="map-btn" id="resetCamera" type="button">Reset 3D view</button>
+          <button class="map-btn active" id="toggleEnvelope" type="button">QHC envelope</button>
+          <button class="map-btn" id="toggleAerial" type="button">Aerial</button>
+          <button class="map-btn" id="selectParcel" type="button">Select parcel on map</button>
+        </div>
+        <div class="map-help" id="mapHelp"><strong>Live compliance model.</strong> Green means the modelled geometry passes; red marks at least one failed check; amber means required context is still unconfirmed.</div>
+        <div class="legend" aria-label="Map legend">
+          <div class="legend-row"><span class="swatch envelope"></span>QHC buildable envelope</div>
+          <div class="legend-row"><span class="swatch pass"></span>Passing model</div>
+          <div class="legend-row"><span class="swatch fail"></span>Failed model</div>
+          <div class="legend-row"><span class="swatch pos"></span>Private open space</div>
+        </div>
+        <div class="map-toast" id="mapToast" role="status"></div>
+      </section>
+
+      <aside class="results-panel" aria-label="Compliance results">
+        <div class="panel-head">
+          <span class="eyebrow" id="chapterLabel">QDC Part 1.1</span>
+          <h2>Compliance snapshot</h2>
+          <p>Acceptable-solution checks update as the model changes.</p>
+        </div>
+        <section class="summary-card review" id="summaryCard">
+          <div class="summary-top"><div><span class="summary-kicker">Preliminary outcome</span><h3 class="summary-title" id="summaryTitle">Needs review</h3><p class="summary-copy" id="summaryCopy">No modelled failure, but site or design items still need confirmation.</p></div><span class="summary-icon" id="summaryIcon">!</span></div>
+          <div class="summary-counts"><div class="summary-count"><strong id="passCount">0</strong><span>Pass</span></div><div class="summary-count"><strong id="failCount">0</strong><span>Fail</span></div><div class="summary-count"><strong id="reviewCount">0</strong><span>Review</span></div></div>
+        </section>
+        <div class="metric-grid">
+          <div class="metric"><span>Assessable lot</span><strong id="metricLotArea">400.0 m²</strong></div>
+          <div class="metric"><span>Site cover</span><strong id="metricSiteCover">40.5%</strong></div>
+          <div class="metric"><span>Max height</span><strong id="metricHeight">8.5 m</strong></div>
+          <div class="metric"><span>Right / rear</span><strong id="metricSetbacks">2.0 / 11.0 m</strong></div>
+        </div>
+        <div class="result-tools">
+          <div class="filter-group"><button class="filter-btn active" data-filter="all" type="button">All</button><button class="filter-btn" data-filter="fail" type="button">Failures</button><button class="filter-btn" data-filter="review" type="button">Review</button></div>
+          <button class="text-btn" id="expandResults" type="button">Show detail</button>
+        </div>
+        <div class="result-groups" id="resultGroups"></div>
+        <p class="legal-note">This is a preliminary visual aid, not a building approval or certification. It models selected acceptable solutions only. Confirm overlays, local alternative provisions, an approved plan of development, the NCC and all other applicable legislation. <a href="https://www.housing.qld.gov.au/__data/assets/pdf_file/0028/92179/queensland-housing-code-pending-publication-version-082026.pdf" target="_blank" rel="noopener">View the official pending QHC (3 August 2026)</a>.</p>
+      </aside>
+    </main>
+  </div>
+
+  <script src="./qhc-rules.js?v=20260807"></script>
+  <script type="module" src="./qhc-studio.js?v=20260807"></script>
+</body>
+</html>

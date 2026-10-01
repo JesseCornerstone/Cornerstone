@@ -1,0 +1,26 @@
+node_modules/
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Runtime and generated data
+*.log
+storage/
+storage-demo/
+tmp/
+coverage/
+public/local-server-status.js
+public/launchers/
+
+# Source archives and exported GIS data are kept outside deployment commits
+branding-source/
+exports/
+removed-sections/
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini

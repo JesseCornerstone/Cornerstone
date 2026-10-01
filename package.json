@@ -1,9 +1,14 @@
 {
-  "name": "cornerstone-auth",
+  "name": "lot-companion",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --experimental-vm-modules scripts/check-syntax.js",
+    "serve:reports": "node va-report-server.js",
+    "local": "node mapping-app.js",
+    "serve:local": "node local-static-server.js",
+    "build:file-pages": "node scripts/build-file-pages.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -16,6 +21,7 @@
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^2.6.12",
     "pdf-parse": "^1.1.1",
+    "puppeteer-core": "^24.16.0",
     "stripe": "^14.0.0"
   }
 }

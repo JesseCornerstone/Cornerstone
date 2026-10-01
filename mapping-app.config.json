@@ -1,0 +1,9 @@
+{
+  "autoUpdate": false,
+  "updateSource": "",
+  "browser": "chrome",
+  "browserMode": "window",
+  "portMode": "auto",
+  "reuseExistingServer": true,
+  "defaultPage": "Index.html"
+}

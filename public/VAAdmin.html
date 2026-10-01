@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lot Companion Report List</title>
+  <link rel="icon" href="/images/lot-companion-icon.png">
+  <link rel="stylesheet" href="/va-integration.css">
+</head>
+<body>
+  <main class="page-shell wide">
+    <header class="brand-header">
+      <img src="/images/lot-companion-logo-white.png" alt="Lot Companion">
+      <div>
+        <p class="eyebrow">Visual Approvals integration</p>
+        <h1>Report requests</h1>
+      </div>
+    </header>
+
+    <section class="panel toolbar-panel">
+      <label>
+        Status
+        <select id="status-filter">
+          <option value="">All statuses</option>
+          <option value="pending">Pending</option>
+          <option value="running">Running</option>
+          <option value="complete">Complete</option>
+          <option value="manual_review">Manual review</option>
+          <option value="failed">Failed</option>
+        </select>
+      </label>
+      <label>
+        API key
+        <input id="api-key" type="password" autocomplete="off">
+      </label>
+      <button id="refresh-button" type="button" class="primary">Refresh</button>
+    </section>
+
+    <section class="panel table-panel">
+      <p id="list-status" class="list-status" aria-live="polite">Loading report requests…</p>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Created</th>
+              <th>Job</th>
+              <th>Address</th>
+              <th>Status</th>
+              <th>Report</th>
+            </tr>
+          </thead>
+          <tbody id="report-rows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/va-admin.js" defer></script>
+</body>
+</html>

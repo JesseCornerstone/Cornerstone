@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Lot Companion mark</title>
+  <path fill="#050505" d="M64 64h97v168c0 61 49 110 110 110h177v82c0 13-11 24-24 24H88c-13 0-24-11-24-24V64Z"/>
+  <path fill="#050505" d="M259 64h121c38 0 68 30 68 68v29h-119c-14 0-25 11-25 25s11 25 25 25h119v29c0 38-30 68-68 68H283c-48 0-86-38-86-86v-96c0-34 28-62 62-62Z"/>
+</svg>

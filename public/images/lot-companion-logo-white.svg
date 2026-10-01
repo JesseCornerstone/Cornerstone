@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="220" viewBox="0 0 780 220" role="img" aria-labelledby="title">
+  <title id="title">Lot Companion</title>
+  <g transform="translate(8 8) scale(.3984375)" fill="#fff">
+    <path d="M64 64h97v168c0 61 49 110 110 110h177v82c0 13-11 24-24 24H88c-13 0-24-11-24-24V64Z"/>
+    <path d="M259 64h121c38 0 68 30 68 68v29h-119c-14 0-25 11-25 25s11 25 25 25h119v29c0 38-30 68-68 68H283c-48 0-86-38-86-86v-96c0-34 28-62 62-62Z"/>
+  </g>
+  <rect x="226" y="18" width="7" height="184" fill="#fff"/>
+  <g fill="#fff" font-family="Arial, Helvetica, sans-serif">
+    <text x="258" y="99" font-size="84" font-weight="800" letter-spacing="2">LOT</text>
+    <text x="258" y="181" font-size="68" font-weight="500" letter-spacing=".5">COMPANION</text>
+  </g>
+</svg>

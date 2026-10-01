@@ -15,11 +15,11 @@ CREATE TABLE dbo.ReportAccessTokens (
     UserEmail   NVARCHAR(320) NULL,                     -- optional
     PaymentId   NVARCHAR(100) NULL,                     -- optional
     ExpiresAt   DATETIME2(0) NOT NULL,                  -- when link expires
-    Used        BIT NOT NULL 
+    Used        BIT NOT NULL
                     CONSTRAINT DF_ReportAccessTokens_Used DEFAULT (0),
     UsedAt      DATETIME2(0) NULL,                      -- when link was used
-    CreatedAt   DATETIME2(0) NOT NULL 
-                    CONSTRAINT DF_ReportAccessTokens_CreatedAt 
+    CreatedAt   DATETIME2(0) NOT NULL
+                    CONSTRAINT DF_ReportAccessTokens_CreatedAt
                         DEFAULT SYSUTCDATETIME()
 );
 GO
@@ -27,7 +27,7 @@ GO
 ------------------------------------------------------------
 -- 3) Optional: index to quickly search by email
 ------------------------------------------------------------
-CREATE INDEX IX_ReportAccessTokens_UserEmail 
+CREATE INDEX IX_ReportAccessTokens_UserEmail
     ON dbo.ReportAccessTokens(UserEmail);
 GO
 

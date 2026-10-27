@@ -4,7 +4,7 @@ This document describes the backend API contract for connecting Visual Approvals
 
 ## Current report capability
 
-The integration service provides:
+The integration service is implemented and ready for controlled testing:
 
 - API-key authentication
 - Direct, one-call PDF generation for external programs
@@ -21,7 +21,7 @@ branded report composer used by the visible mapping interface. A successful,
 high-confidence request returns `complete`; `manual_review` is retained for a
 completed report whose council detection is low confidence.
 
-## Report-only service
+## Local demonstration
 
 ### Cornerstone Application Intake / report-only service
 
@@ -52,6 +52,73 @@ To run the report-only service manually:
 $env:VA_API_KEYS='replace_with_long_random_key'
 $env:VA_REQUIRE_HTTPS='false' # local loopback testing only
 npm run serve:reports
+```
+
+For a local demo, run:
+
+```powershell
+npm run demo:integration
+```
+
+On Windows, you can also double-click:
+
+```text
+launchers\START HERE - LOT COMPANION INTEGRATION DEMO.cmd
+```
+
+The demo runner:
+
+- starts `server.js` on a local port, usually `3112`
+- sets `VA_API_KEYS=demo-va-key`
+- sets `VA_REQUIRE_HTTPS=false`
+- stores demo requests and PDFs in `storage-demo`
+- opens `/VADemo.html?apiKey=demo-va-key`
+
+The demonstration page submits a sample Visual Approvals job, polls
+`/api/va/report-status/:requestId`, and enables the report download when the
+completed PDF is ready. The report list opens `/VAAdmin.html` with the same
+demonstration API key.
+
+If you open `public/VADemo.html` through VS Code Live Server, the page is usually served from `http://127.0.0.1:5500`. That static server cannot handle `/api/va/*` requests, so keep the Express service running with `npm run demo:integration` and set the page's `Report service URL` field to:
+
+```text
+http://127.0.0.1:3112
+```
+
+You can also pass it in the URL:
+
+```text
+http://127.0.0.1:5500/public/VADemo.html?apiKey=demo-va-key&apiBase=http%3A%2F%2F127.0.0.1%3A3112
+```
+
+## Integration smoke test
+
+To test the VA API contract without using the browser demo, run:
+
+```powershell
+npm run test:integration
+```
+
+On Windows, you can also double-click:
+
+```text
+launchers\Test VA Integration.cmd
+```
+
+The smoke test starts a local server with `VA_API_KEYS=demo-va-key`, stores the test server's request history under `storage-demo/test-storage`, verifies direct PDF generation through `/api/va/report-generate`, then sends a sample VA job to `/api/va/report-request`, polls status until `complete` or `manual_review`, checks the summary and admin-list endpoints, downloads the generated PDF, and saves the downloaded copy under `storage-demo/test-downloads`.
+
+If PowerShell blocks `npm.ps1`, use the Windows command shim instead:
+
+```powershell
+npm.cmd run test:integration
+```
+
+To run the same test against an already running or hosted server:
+
+```powershell
+$env:VA_TEST_BASE_URL="https://your-host.example.com"
+$env:VA_TEST_API_KEY="replace_with_configured_key"
+npm run test:integration
 ```
 
 ## Authentication

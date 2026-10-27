@@ -6,12 +6,16 @@
   const apiKeyInput = document.querySelector('#api-key');
   const statusFilter = document.querySelector('#status-filter');
   const refreshButton = document.querySelector('#refresh-button');
+  const demoLink = document.querySelector('#demo-link');
   const listStatus = document.querySelector('#list-status');
   const rows = document.querySelector('#report-rows');
 
+  apiKeyInput.value = params.get('apiKey') || '';
   refreshButton.addEventListener('click', loadReports);
   statusFilter.addEventListener('change', loadReports);
-  listStatus.textContent = 'Enter the API key, then select Refresh.';
+  apiKeyInput.addEventListener('change', updateDemoLink);
+  updateDemoLink();
+  loadReports();
 
   async function loadReports() {
     refreshButton.disabled = true;
@@ -117,5 +121,10 @@
   function formatDate(value) {
     const date = new Date(value);
     return Number.isNaN(date.valueOf()) ? String(value || '') : date.toLocaleString('en-AU');
+  }
+
+  function updateDemoLink() {
+    const query = new URLSearchParams({ apiBase, apiKey: apiKeyInput.value.trim() });
+    demoLink.href = `/VADemo.html?${query}`;
   }
 })();

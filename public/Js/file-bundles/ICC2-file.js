@@ -4,699 +4,6 @@
   window.__LOT_WISE_FILE_MODE__ = true;
   installFileModeApiShim();
 
-  // Shared preliminary Bushfire Attack Level calculator for every council map.
-  //
-  // The calculation follows the AS 3959:2018 Appendix B radiant-heat sequence.
-  // It is deliberately transparent about its inputs: mapping can identify a
-  // potentially affected parcel, but vegetation, slope and separation still need
-  // to be measured and confirmed for the proposed building location.
-
-  const BAL_VEGETATION_CLASSES = Object.freeze({
-    forest: Object.freeze({
-      label: 'Forest',
-      model: 'forest',
-      surfaceFuelLoad: 25,
-      totalFuelLoad: 35,
-      vegetationHeight: null
-    }),
-    woodland: Object.freeze({
-      label: 'Woodland',
-      model: 'forest',
-      surfaceFuelLoad: 15,
-      totalFuelLoad: 25,
-      vegetationHeight: null
-    }),
-    shrubland: Object.freeze({
-      label: 'Shrubland',
-      model: 'shrub',
-      surfaceFuelLoad: 15,
-      totalFuelLoad: 15,
-      vegetationHeight: 1.5
-    }),
-    scrub: Object.freeze({
-      label: 'Scrub',
-      model: 'shrub',
-      surfaceFuelLoad: 25,
-      totalFuelLoad: 25,
-      vegetationHeight: 3
-    }),
-    mallee: Object.freeze({
-      label: 'Mallee / mulga',
-      model: 'shrub',
-      surfaceFuelLoad: 8,
-      totalFuelLoad: 8,
-      vegetationHeight: 3
-    }),
-    rainforest: Object.freeze({
-      label: 'Rainforest',
-      model: 'forest',
-      surfaceFuelLoad: 10,
-      totalFuelLoad: 12,
-      vegetationHeight: null
-    }),
-    tussock: Object.freeze({
-      label: 'Tussock moorland',
-      model: 'tussock',
-      surfaceFuelLoad: 17,
-      totalFuelLoad: 17,
-      vegetationHeight: null
-    }),
-    grassland: Object.freeze({
-      label: 'Grassland',
-      model: 'grass',
-      surfaceFuelLoad: 4.5,
-      totalFuelLoad: 4.5,
-      vegetationHeight: null
-    })
-  });
-
-  const BAL_LEVEL_RANK = Object.freeze({
-    'BAL-Low': 0,
-    'BAL-12.5': 1,
-    'BAL-19': 2,
-    'BAL-29': 3,
-    'BAL-40': 4,
-    'BAL-FZ': 5
-  });
-
-  const BAL_SIGMA_KW = 5.67e-11;
-  const BAL_HEAT_OF_COMBUSTION = 18600;
-  const BAL_DEFAULT_FLAME_TEMPERATURE = 1090;
-  const BAL_DEFAULT_AMBIENT_TEMPERATURE = 308;
-  const BAL_DEFAULT_RELATIVE_HUMIDITY = 0.25;
-  const BAL_DEFAULT_EMISSIVITY = 0.95;
-  const BAL_DEFAULT_FLAME_WIDTH = 100;
-  const BAL_DEFAULT_WIND_SPEED = 45;
-
-  const balToNumber = (value, fallback = NaN) => {
-    if(value === '' || value === null || value === undefined) return fallback;
-    const number = Number(value);
-    return Number.isFinite(number) ? number : fallback;
-  };
-
-  const balClamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
-  const balRadians = degrees => degrees * Math.PI / 180;
-
-  const balRequireRange = (name, value, minimum, maximum, { inclusiveMinimum = true } = {}) => {
-    const validMinimum = inclusiveMinimum ? value >= minimum : value > minimum;
-    if(!Number.isFinite(value) || !validMinimum || value > maximum){
-      const lowerText = inclusiveMinimum ? `${minimum}` : `more than ${minimum}`;
-      throw new RangeError(`${name} must be ${lowerText} to ${maximum}.`);
-    }
-  };
-
-  /** Convert the AS 3959 deemed FFDI values to GFDI for grassland modelling. */
-  function grasslandFdiFor(ffdi) {
-    const value = balToNumber(ffdi);
-    balRequireRange('FFDI', value, 1, 250);
-    const points = [
-      [40, 50],
-      [50, 70],
-      [70, 100],
-      [80, 110],
-      [100, 130]
-    ];
-
-    if(value <= points[0][0]) return points[0][1] * value / points[0][0];
-    for(let index = 1; index < points.length; index += 1){
-      const lower = points[index - 1];
-      const upper = points[index];
-      if(value <= upper[0]){
-        const fraction = (value - lower[0]) / (upper[0] - lower[0]);
-        return lower[1] + fraction * (upper[1] - lower[1]);
-      }
-    }
-    const lower = points[points.length - 2];
-    const upper = points[points.length - 1];
-    return upper[1] + (value - upper[0]) * (upper[1] - lower[1]) / (upper[0] - lower[0]);
-  }
-
-  /** Assign a BAL from calculated radiant heat. BAL-Low needs a separate exclusion. */
-  function classifyBal(radiantHeat, { lowThreat = false, distance = null } = {}) {
-    const heat = balToNumber(radiantHeat);
-    if(lowThreat || (Number.isFinite(Number(distance)) && Number(distance) > 100)) return 'BAL-Low';
-    if(!Number.isFinite(heat) || heat < 0) throw new RangeError('Radiant heat must be zero or greater.');
-    if(heat <= 12.5) return 'BAL-12.5';
-    if(heat <= 19) return 'BAL-19';
-    if(heat <= 29) return 'BAL-29';
-    if(heat <= 40) return 'BAL-40';
-    return 'BAL-FZ';
-  }
-
-  function balViewFactor({ flameLength, flameWidth, flameAngle, siteSlope, distance, receiverElevation }) {
-    if(flameLength < 0.1) return 0;
-    const alpha = balRadians(flameAngle);
-    const theta = balRadians(siteSlope);
-    const halfProjection = 0.5 * flameLength * Math.cos(alpha);
-    const separation = distance - halfProjection;
-    if(separation <= 0) return 1;
-
-    const tangent = Math.tan(theta);
-    const x1 = (
-      flameLength * Math.sin(alpha)
-      - halfProjection * tangent
-      - distance * tangent
-      - receiverElevation
-    ) / separation;
-    const x2 = (receiverElevation + separation * tangent) / separation;
-    const y = 0.5 * flameWidth / separation;
-
-    const term = (x, width) => {
-      const rootX = Math.sqrt(1 + x * x);
-      const rootY = Math.sqrt(1 + width * width);
-      return (x / rootX) * Math.atan(width / rootX)
-        + (width / rootY) * Math.atan(x / rootY);
-    };
-
-    return balClamp((term(x1, y) + term(x2, y)) / Math.PI, 0, 1);
-  }
-
-  function balPeakViewFactor({ flameLength, flameWidth, siteSlope, distance }) {
-    let best = {
-      viewFactor: 0,
-      flameAngle: 90,
-      receiverElevation: 0,
-      pathLength: distance
-    };
-
-    for(let angle = 0; angle <= 90; angle += 0.25){
-      const alpha = balRadians(angle);
-      const receiverElevation = Math.max(
-        0,
-        0.5 * flameLength * Math.sin(alpha) - distance * Math.tan(balRadians(siteSlope))
-      );
-      const viewFactor = balViewFactor({
-        flameLength,
-        flameWidth,
-        flameAngle: angle,
-        siteSlope,
-        distance,
-        receiverElevation
-      });
-      if(viewFactor > best.viewFactor){
-        best = {
-          viewFactor,
-          flameAngle: angle,
-          receiverElevation,
-          pathLength: Math.max(0, distance - 0.5 * flameLength * Math.cos(alpha))
-        };
-      }
-    }
-    return best;
-  }
-
-  function balAtmosphericTransmissivity(pathLength, {
-    ambientTemperature = BAL_DEFAULT_AMBIENT_TEMPERATURE,
-    flameTemperature = BAL_DEFAULT_FLAME_TEMPERATURE,
-    relativeHumidity = BAL_DEFAULT_RELATIVE_HUMIDITY
-  } = {}) {
-    if(pathLength <= 0) return 1;
-    const constants = [
-      [1.486, -0.002003, 0.0000468, -0.06052],
-      [0.01225, -0.000059, 0.00000166, -0.001759],
-      [-0.0001489, 0.0000006893, -0.00000001922, 0.00002092],
-      [0.0000008381, -0.000000003823, 0.00000000010511, -0.0000001166],
-      [-0.000000001685, 0.000000000007637, -0.0000000000002085, 0.000000000235]
-    ];
-    const coefficients = constants.map(([c1, c2, c3, c4]) =>
-      c1 + c2 * ambientTemperature + c3 * flameTemperature + c4 * relativeHumidity
-    );
-    const transmissivity = coefficients.reduce(
-      (sum, coefficient, power) => sum + coefficient * Math.pow(pathLength, power),
-      0
-    );
-    return balClamp(transmissivity, 0, 1);
-  }
-
-  /**
-   * Calculate one vegetation exposure using the AS 3959 Appendix B sequence.
-   * The highest exposure from every direction around a building governs the lot.
-   */
-  function calculateBalMethod2(input = {}) {
-    const vegetationKey = String(input.vegetation || 'forest').toLowerCase();
-    const profile = BAL_VEGETATION_CLASSES[vegetationKey];
-    if(!profile) throw new RangeError('Select a recognised vegetation classification.');
-
-    const lowThreat = input.lowThreat === true;
-    const ffdi = balToNumber(input.ffdi, 40);
-    const distance = balToNumber(input.distance, 20);
-    const effectiveSlope = balToNumber(input.effectiveSlope, 0);
-    const siteSlopeMagnitude = balToNumber(input.siteSlope, effectiveSlope);
-    const slopeType = String(input.slopeType || 'level').toLowerCase();
-    const surfaceFuelLoad = balToNumber(input.surfaceFuelLoad, profile.surfaceFuelLoad);
-    const totalFuelLoad = balToNumber(input.totalFuelLoad, profile.totalFuelLoad);
-    const vegetationHeight = balToNumber(input.vegetationHeight, profile.vegetationHeight);
-    const windSpeed = balToNumber(input.windSpeed, BAL_DEFAULT_WIND_SPEED);
-    const grassFdi = balToNumber(input.grassFdi, grasslandFdiFor(ffdi));
-    const flameWidth = balToNumber(input.flameWidth, BAL_DEFAULT_FLAME_WIDTH);
-    const flameTemperature = balToNumber(input.flameTemperature, BAL_DEFAULT_FLAME_TEMPERATURE);
-    const ambientTemperature = balToNumber(input.ambientTemperature, BAL_DEFAULT_AMBIENT_TEMPERATURE);
-    const relativeHumidity = balToNumber(input.relativeHumidity, BAL_DEFAULT_RELATIVE_HUMIDITY);
-    const emissivity = balToNumber(input.emissivity, BAL_DEFAULT_EMISSIVITY);
-    const tussockMoistureFactor = balToNumber(input.tussockMoistureFactor, 5);
-    const tussockAge = balToNumber(input.tussockAge, 20);
-
-    if(!['downslope', 'level', 'upslope'].includes(slopeType)){
-      throw new RangeError('Slope type must be downslope, level or upslope.');
-    }
-    balRequireRange('FFDI', ffdi, 1, 250);
-    balRequireRange('Distance', distance, 0, 500, { inclusiveMinimum: false });
-    balRequireRange('Effective slope', effectiveSlope, 0, slopeType === 'upslope' ? 15 : 20);
-    balRequireRange('Site slope', siteSlopeMagnitude, 0, 30);
-    balRequireRange('Surface fuel load', surfaceFuelLoad, 0, 100, { inclusiveMinimum: false });
-    balRequireRange('Total fuel load', totalFuelLoad, surfaceFuelLoad, 150);
-    balRequireRange('Wind speed', windSpeed, 0, 150, { inclusiveMinimum: false });
-    balRequireRange('Grassland FDI', grassFdi, 0, 400, { inclusiveMinimum: false });
-    balRequireRange('Flame width', flameWidth, 0, 1000, { inclusiveMinimum: false });
-    balRequireRange('Flame temperature', flameTemperature, 273, 2000, { inclusiveMinimum: false });
-    balRequireRange('Ambient temperature', ambientTemperature, 200, 400);
-    balRequireRange('Relative humidity', relativeHumidity, 0, 1);
-    balRequireRange('Flame emissivity', emissivity, 0, 1, { inclusiveMinimum: false });
-    if(profile.model === 'shrub'){
-      balRequireRange('Vegetation height', vegetationHeight, 0, 30, { inclusiveMinimum: false });
-    }
-
-    const slopeDirection = slopeType === 'downslope' ? 1 : slopeType === 'upslope' ? -1 : 0;
-    const slopeAdjustedDegrees = slopeType === 'upslope' ? Math.min(effectiveSlope, 15) : effectiveSlope;
-    const slopeFactor = Math.exp(0.069 * slopeDirection * slopeAdjustedDegrees);
-    const siteSlope = slopeDirection * siteSlopeMagnitude;
-
-    let rateOfSpread;
-    if(profile.model === 'forest'){
-      rateOfSpread = 0.0012 * ffdi * surfaceFuelLoad;
-    }else if(profile.model === 'shrub'){
-      rateOfSpread = 0.023 * Math.pow(windSpeed, 1.21) * Math.pow(vegetationHeight, 0.54);
-    }else if(profile.model === 'tussock'){
-      rateOfSpread = 0.024
-        * Math.pow(windSpeed, 1.312)
-        * Math.exp(-0.0243 * tussockMoistureFactor)
-        * (1 - Math.exp(-0.116 * tussockAge));
-    }else{
-      rateOfSpread = 0.13 * grassFdi;
-    }
-
-    const adjustedRateOfSpread = rateOfSpread * slopeFactor;
-    const firelineIntensity = BAL_HEAT_OF_COMBUSTION * totalFuelLoad * adjustedRateOfSpread / 36;
-    let flameLength;
-    if(profile.model === 'forest'){
-      flameLength = (13 * adjustedRateOfSpread + 0.24 * totalFuelLoad) / 2;
-    }else if(profile.model === 'grass'){
-      flameLength = 1.192 * Math.pow(firelineIntensity / 1000, 0.5);
-    }else{
-      flameLength = 0.0775 * Math.pow(firelineIntensity, 0.46);
-    }
-
-    const geometry = balPeakViewFactor({ flameLength, flameWidth, siteSlope, distance });
-    const transmissivity = balAtmosphericTransmissivity(geometry.pathLength, {
-      ambientTemperature,
-      flameTemperature,
-      relativeHumidity
-    });
-    const flameEmissivePower = BAL_SIGMA_KW * emissivity * Math.pow(flameTemperature, 4);
-    const radiantHeat = transmissivity * geometry.viewFactor * flameEmissivePower;
-    const bal = classifyBal(radiantHeat, { lowThreat, distance });
-
-    const warnings = [];
-    if(distance > 100) warnings.push('Classified vegetation beyond 100 m has been treated as BAL-Low.');
-    if(lowThreat) warnings.push('BAL-Low relies on the selected low-threat or exclusion condition being verified.');
-    if(profile.model === 'grass' && !Number.isFinite(balToNumber(input.grassFdi))){
-      warnings.push('GFDI was interpolated from the entered FFDI; confirm the applicable grassland value.');
-    }
-
-    return Object.freeze({
-      bal,
-      radiantHeat,
-      vegetation: vegetationKey,
-      vegetationLabel: profile.label,
-      model: profile.model,
-      ffdi,
-      grassFdi,
-      slopeType,
-      effectiveSlope,
-      siteSlope,
-      distance,
-      surfaceFuelLoad,
-      totalFuelLoad,
-      vegetationHeight,
-      rateOfSpread,
-      adjustedRateOfSpread,
-      firelineIntensity,
-      flameLength,
-      flameWidth,
-      flameAngle: geometry.flameAngle,
-      receiverElevation: geometry.receiverElevation,
-      pathLength: geometry.pathLength,
-      viewFactor: geometry.viewFactor,
-      transmissivity,
-      flameEmissivePower,
-      lowThreat,
-      warnings: Object.freeze(warnings)
-    });
-  }
-
-  function worstBal(results = []) {
-    return results.reduce((worst, result) => {
-      if(!result?.bal) return worst;
-      if(!worst || BAL_LEVEL_RANK[result.bal] > BAL_LEVEL_RANK[worst.bal]) return result;
-      if(BAL_LEVEL_RANK[result.bal] === BAL_LEVEL_RANK[worst.bal]
-        && Number(result.radiantHeat) > Number(worst.radiantHeat)) return result;
-      return worst;
-    }, null);
-  }
-
-  function balEscape(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  function balFormat(value, digits = 1) {
-    return Number(value).toLocaleString('en-AU', {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits
-    });
-  }
-
-  function balInstallStyles() {
-    if(document.getElementById('bal-calculator-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'bal-calculator-styles';
-    style.textContent = `
-      #balCalculatorCard{color:var(--map-ink,#111)}
-      #balCalculatorCard .bal-summary{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;list-style:none}
-      #balCalculatorCard .bal-summary::-webkit-details-marker{display:none}
-      #balCalculatorCard .bal-summary h2{margin:0}
-      #balCalculatorCard .bal-status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:800;letter-spacing:.02em;background:var(--map-panel-2,#eef2f7);color:var(--map-muted,#667085)}
-      #balCalculatorCard .bal-status.affected{background:#fff1f0;color:#b42318}
-      #balCalculatorCard .bal-status.clear{background:#ecfdf3;color:#067647}
-      #balCalculatorCard .bal-intro{margin:10px 0 8px;color:var(--map-muted,#667085);font-size:12px;line-height:1.4}
-      #balCalculatorCard .bal-warning{border-left:3px solid #f79009;background:rgba(247,144,9,.09);border-radius:6px;padding:8px 10px;margin:8px 0 10px;font-size:11px;line-height:1.4;color:var(--map-ink,#333)}
-      #balCalculatorCard .bal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-      #balCalculatorCard .bal-field{display:flex;flex-direction:column;gap:4px;min-width:0}
-      #balCalculatorCard .bal-field.wide{grid-column:1/-1}
-      #balCalculatorCard label{font-size:11px;font-weight:800;color:var(--map-muted,#667085)}
-      #balCalculatorCard input,#balCalculatorCard select{box-sizing:border-box;width:100%;min-height:36px;border:1px solid var(--map-border,#d0d4dc);border-radius:8px;padding:7px 8px;background:var(--map-panel,#fff);color:var(--map-ink,#111);font:inherit;font-size:12px}
-      #balCalculatorCard input:focus,#balCalculatorCard select:focus{outline:2px solid rgba(32,84,212,.22);border-color:var(--map-accent,#2054d4)}
-      #balCalculatorCard .bal-check{display:flex;align-items:flex-start;gap:8px;margin:10px 0;font-size:11px;line-height:1.35;color:var(--map-muted,#667085)}
-      #balCalculatorCard .bal-check input{width:auto;min-height:auto;margin-top:2px}
-      #balCalculatorCard .bal-advanced{margin:10px 0;border-top:1px solid var(--map-border,#e1e3e6);border-bottom:1px solid var(--map-border,#e1e3e6);padding:8px 0}
-      #balCalculatorCard .bal-advanced>summary{cursor:pointer;font-size:11px;font-weight:800;color:var(--map-muted,#667085)}
-      #balCalculatorCard .bal-advanced .bal-grid{margin-top:8px}
-      #balCalculatorCard .bal-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
-      #balCalculatorCard .bal-button{border:0;border-radius:999px;padding:8px 12px;background:var(--map-accent,#2054d4);color:#fff;font:inherit;font-size:12px;font-weight:800;cursor:pointer}
-      #balCalculatorCard .bal-button:disabled{opacity:.45;cursor:not-allowed}
-      #balCalculatorCard .bal-button.secondary{border:1px solid var(--map-border,#d0d4dc);background:var(--map-panel-2,#f7f9fc);color:var(--map-ink,#333)}
-      #balCalculatorCard .bal-output{margin-top:10px;border:1px solid var(--map-border,#e1e3e6);border-radius:10px;padding:10px;background:var(--map-panel-2,#fafbfc)}
-      #balCalculatorCard .bal-output[hidden]{display:none}
-      #balCalculatorCard .bal-result-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
-      #balCalculatorCard .bal-rating{font-size:22px;font-weight:900;color:var(--map-ink,#111)}
-      #balCalculatorCard .bal-heat{font-size:12px;font-weight:800;color:var(--map-muted,#667085)}
-      #balCalculatorCard .bal-workings{margin-top:5px;font-size:10px;line-height:1.45;color:var(--map-muted,#667085)}
-      #balCalculatorCard .bal-error{color:#b42318;font-size:11px;font-weight:700;margin-top:8px}
-      #balCalculatorCard .bal-scenarios{margin-top:12px}
-      #balCalculatorCard .bal-scenarios[hidden]{display:none}
-      #balCalculatorCard .bal-overall{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-radius:9px;background:rgba(32,84,212,.09);font-size:11px;font-weight:800}
-      #balCalculatorCard .bal-overall strong{font-size:17px}
-      #balCalculatorCard .bal-aspect-list{list-style:none;padding:0;margin:5px 0 0}
-      #balCalculatorCard .bal-aspect-list li{display:grid;grid-template-columns:30px 1fr auto auto;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--map-border,#e1e3e6);font-size:10px}
-      #balCalculatorCard .bal-aspect-list button{border:0;background:transparent;color:#b42318;cursor:pointer;font-size:14px;padding:2px 4px}
-      #balCalculatorCard .bal-source{margin:10px 0 0;font-size:10px;line-height:1.4;color:var(--map-muted,#667085)}
-      #balCalculatorCard .bal-source a{color:var(--map-accent,#2054d4);font-weight:800;text-decoration:none}
-      @media(max-width:720px){#balCalculatorCard .bal-grid{grid-template-columns:1fr}}
-    `;
-    document.head.appendChild(style);
-  }
-
-  function balCalculatorMarkup() {
-    const vegetationOptions = Object.entries(BAL_VEGETATION_CLASSES)
-      .map(([key, profile]) => `<option value="${key}">${balEscape(profile.label)}</option>`)
-      .join('');
-    const aspects = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-      .map(value => `<option value="${value}">${value}</option>`)
-      .join('');
-
-    return `
-      <details id="balCalculatorDetails">
-        <summary class="bal-summary">
-          <h2 class="section-title">Bushfire Attack Level</h2>
-          <span id="balOverlayStatus" class="bal-status">Select a lot</span>
-        </summary>
-        <p id="balLotContext" class="bal-intro">Select a parcel, then enter site-assessed inputs for each vegetation direction.</p>
-        <div class="bal-warning"><strong>Preliminary calculator only.</strong> Overlay mapping does not determine a BAL. Confirm vegetation, slopes, distance, FFDI and exclusions on site; a competent practitioner must verify any approval or construction decision.</div>
-        <form id="balCalculatorForm" novalidate>
-          <div class="bal-grid">
-            <div class="bal-field">
-              <label for="balAspect">Exposure direction</label>
-              <select id="balAspect">${aspects}</select>
-            </div>
-            <div class="bal-field">
-              <label for="balVegetation">Vegetation class</label>
-              <select id="balVegetation">${vegetationOptions}</select>
-            </div>
-            <div class="bal-field">
-              <label for="balFfdi">FFDI</label>
-              <input id="balFfdi" type="number" min="1" max="250" step="1" value="40" inputmode="decimal">
-            </div>
-            <div class="bal-field">
-              <label for="balDistance">Horizontal separation (m)</label>
-              <input id="balDistance" type="number" min="0.1" max="500" step="0.1" value="20" inputmode="decimal">
-            </div>
-            <div class="bal-field wide">
-              <label for="balSlopeType">Vegetation position relative to building</label>
-              <select id="balSlopeType">
-                <option value="downslope">Downslope (fire runs uphill to building)</option>
-                <option value="level" selected>Level</option>
-                <option value="upslope">Upslope (fire runs downhill to building)</option>
-              </select>
-            </div>
-            <div class="bal-field">
-              <label for="balEffectiveSlope">Slope under vegetation (°)</label>
-              <input id="balEffectiveSlope" type="number" min="0" max="20" step="0.1" value="0" inputmode="decimal">
-            </div>
-            <div class="bal-field">
-              <label for="balSiteSlope">Site-to-vegetation slope (°)</label>
-              <input id="balSiteSlope" type="number" min="0" max="30" step="0.1" value="0" inputmode="decimal">
-            </div>
-          </div>
-          <label class="bal-check"><input id="balLowThreat" type="checkbox"> <span>A qualified assessment confirms an AS 3959 low-threat vegetation or other BAL-Low exclusion applies in this direction.</span></label>
-          <details class="bal-advanced">
-            <summary>Advanced fuel and flame inputs</summary>
-            <div class="bal-grid">
-              <div class="bal-field">
-                <label for="balSurfaceFuel">Surface fuel (t/ha)</label>
-                <input id="balSurfaceFuel" type="number" min="0.1" max="100" step="0.1" value="25" inputmode="decimal">
-              </div>
-              <div class="bal-field">
-                <label for="balTotalFuel">Total fuel (t/ha)</label>
-                <input id="balTotalFuel" type="number" min="0.1" max="150" step="0.1" value="35" inputmode="decimal">
-              </div>
-              <div class="bal-field">
-                <label for="balVegetationHeight">Vegetation height (m)</label>
-                <input id="balVegetationHeight" type="number" min="0.1" max="30" step="0.1" value="" placeholder="Not used" inputmode="decimal">
-              </div>
-              <div class="bal-field">
-                <label for="balWindSpeed">10 m wind speed (km/h)</label>
-                <input id="balWindSpeed" type="number" min="1" max="150" step="0.1" value="45" inputmode="decimal">
-              </div>
-              <div class="bal-field">
-                <label for="balGrassFdi">GFDI (grass only)</label>
-                <input id="balGrassFdi" type="number" min="1" max="400" step="0.1" value="" placeholder="Derived from FFDI" inputmode="decimal">
-              </div>
-              <div class="bal-field">
-                <label for="balFlameWidth">Flame width (m)</label>
-                <input id="balFlameWidth" type="number" min="0.1" max="1000" step="0.1" value="100" inputmode="decimal">
-              </div>
-            </div>
-          </details>
-          <div class="bal-actions">
-            <button id="balCalculate" class="bal-button" type="submit" disabled>Calculate &amp; save aspect</button>
-            <button id="balClearAspects" class="bal-button secondary" type="button">Clear aspects</button>
-          </div>
-          <div id="balError" class="bal-error" role="alert" hidden></div>
-        </form>
-        <div id="balOutput" class="bal-output" aria-live="polite" hidden></div>
-        <div id="balScenarios" class="bal-scenarios" hidden>
-          <div id="balOverall" class="bal-overall"></div>
-          <ul id="balAspectList" class="bal-aspect-list"></ul>
-        </div>
-        <p class="bal-source">Method: AS 3959:2018 Appendix B view-factor radiant heat calculation, including Amendments 1 and 2. Queensland planning assessments may require site-specific VHC fuel and FFDI inputs. <a href="https://www.fire.qld.gov.au/compliance-and-planning/bushfire-planning/brc" target="_blank" rel="noopener">Queensland technical guidance</a>.</p>
-      </details>
-    `;
-  }
-
-  /** Insert and wire the shared calculator in a council map summary panel. */
-  function initBalCalculator() {
-    if(typeof document === 'undefined' || document.getElementById('balCalculatorCard')) return null;
-    const overlayList = document.getElementById('sumOverlays');
-    const summaryPanel = document.getElementById('panel-summary');
-    if(!overlayList || !summaryPanel) return null;
-
-    balInstallStyles();
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.id = 'balCalculatorCard';
-    card.innerHTML = balCalculatorMarkup();
-    const overlayCard = overlayList.closest?.('.card');
-    if(overlayCard) overlayCard.insertAdjacentElement('afterend', card);
-    else summaryPanel.appendChild(card);
-
-    const element = id => document.getElementById(id);
-    const form = element('balCalculatorForm');
-    const calculateButton = element('balCalculate');
-    const details = element('balCalculatorDetails');
-    const scenarios = new Map();
-    let currentLot = '';
-    let openedAffectedLot = '';
-
-    const updateFuelDefaults = () => {
-      const profile = BAL_VEGETATION_CLASSES[element('balVegetation').value];
-      if(!profile) return;
-      element('balSurfaceFuel').value = profile.surfaceFuelLoad;
-      element('balTotalFuel').value = profile.totalFuelLoad;
-      element('balVegetationHeight').value = profile.vegetationHeight ?? '';
-      element('balVegetationHeight').placeholder = profile.model === 'shrub' ? 'Required' : 'Not used';
-    };
-
-    const clearScenarios = () => {
-      scenarios.clear();
-      element('balOutput').hidden = true;
-      element('balScenarios').hidden = true;
-      element('balError').hidden = true;
-      element('balAspectList').innerHTML = '';
-    };
-
-    const renderScenarios = () => {
-      const values = Array.from(scenarios.values());
-      const container = element('balScenarios');
-      if(!values.length){
-        container.hidden = true;
-        return;
-      }
-      const worst = worstBal(values.map(item => item.result));
-      container.hidden = false;
-      element('balOverall').innerHTML = `<span>Overall lot result (highest saved aspect)</span><strong>${balEscape(worst.bal)}</strong>`;
-      element('balAspectList').innerHTML = values.map(item => `
-        <li>
-          <strong>${balEscape(item.aspect)}</strong>
-          <span>${balEscape(item.result.vegetationLabel)}</span>
-          <span>${balEscape(item.result.bal)} · ${balFormat(item.result.radiantHeat)} kW/m²</span>
-          <button type="button" data-bal-remove="${balEscape(item.aspect)}" aria-label="Remove ${balEscape(item.aspect)} aspect">×</button>
-        </li>
-      `).join('');
-    };
-
-    const refreshContext = () => {
-      const lotText = String(element('sumLot')?.textContent || '').trim();
-      const selected = !!lotText && !/^--/.test(lotText) && !/select/i.test(lotText);
-      if(selected && currentLot && lotText !== currentLot) clearScenarios();
-      currentLot = selected ? lotText : '';
-      calculateButton.disabled = !selected;
-
-      const overlayText = String(overlayList.textContent || '').replace(/\s+/g, ' ').trim();
-      const affected = selected
-        && /bush\s*fire|bushfire/i.test(overlayText)
-        && !/no bush\s*fire|no bushfire|not affected by bushfire/i.test(overlayText);
-      const status = element('balOverlayStatus');
-      status.className = `bal-status${affected ? ' affected' : selected ? ' clear' : ''}`;
-      status.textContent = affected ? 'Bushfire mapping found' : selected ? 'Check site inputs' : 'Select a lot';
-      element('balLotContext').textContent = selected
-        ? `Lot ${lotText}: assess every direction containing classified vegetation; the highest BAL governs.`
-        : 'Select a parcel, then enter site-assessed inputs for each vegetation direction.';
-      if(affected && openedAffectedLot !== lotText){
-        details.open = true;
-        openedAffectedLot = lotText;
-      }
-    };
-
-    element('balVegetation').addEventListener('change', updateFuelDefaults);
-    element('balSlopeType').addEventListener('change', () => {
-      const type = element('balSlopeType').value;
-      const slope = element('balEffectiveSlope');
-      slope.max = type === 'upslope' ? '15' : '20';
-      if(type === 'level'){
-        slope.value = '0';
-        element('balSiteSlope').value = '0';
-      }
-    });
-    element('balClearAspects').addEventListener('click', clearScenarios);
-    element('balAspectList').addEventListener('click', event => {
-      const button = event.target.closest?.('[data-bal-remove]');
-      if(!button) return;
-      scenarios.delete(button.getAttribute('data-bal-remove'));
-      renderScenarios();
-    });
-
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      const error = element('balError');
-      error.hidden = true;
-      try{
-        if(!currentLot) throw new Error('Select a parcel before calculating a BAL.');
-        const optionalNumber = id => {
-          const raw = element(id).value.trim();
-          return raw === '' ? undefined : Number(raw);
-        };
-        const result = calculateBalMethod2({
-          vegetation: element('balVegetation').value,
-          ffdi: Number(element('balFfdi').value),
-          distance: Number(element('balDistance').value),
-          slopeType: element('balSlopeType').value,
-          effectiveSlope: Number(element('balEffectiveSlope').value),
-          siteSlope: Number(element('balSiteSlope').value),
-          lowThreat: element('balLowThreat').checked,
-          surfaceFuelLoad: optionalNumber('balSurfaceFuel'),
-          totalFuelLoad: optionalNumber('balTotalFuel'),
-          vegetationHeight: optionalNumber('balVegetationHeight'),
-          windSpeed: optionalNumber('balWindSpeed'),
-          grassFdi: optionalNumber('balGrassFdi'),
-          flameWidth: optionalNumber('balFlameWidth')
-        });
-        const aspect = element('balAspect').value;
-        scenarios.set(aspect, { aspect, result });
-        const output = element('balOutput');
-        output.hidden = false;
-        output.innerHTML = `
-          <div class="bal-result-row"><span class="bal-rating">${balEscape(result.bal)}</span><span class="bal-heat">${balFormat(result.radiantHeat)} kW/m²</span></div>
-          <div class="bal-workings">${balEscape(aspect)} · ${balEscape(result.vegetationLabel)} · flame ${balFormat(result.flameLength)} m · adjusted spread ${balFormat(result.adjustedRateOfSpread, 2)} km/h · view factor ${balFormat(result.viewFactor, 3)} · transmissivity ${balFormat(result.transmissivity, 3)}${result.warnings.length ? `<br>${result.warnings.map(balEscape).join(' ')}` : ''}</div>
-        `;
-        renderScenarios();
-      }catch(calculationError){
-        error.textContent = calculationError?.message || String(calculationError);
-        error.hidden = false;
-      }
-    });
-
-    if(typeof MutationObserver !== 'undefined'){
-      const observer = new MutationObserver(refreshContext);
-      observer.observe(overlayList, { childList: true, subtree: true, characterData: true });
-      const lotElement = element('sumLot');
-      if(lotElement) observer.observe(lotElement, { childList: true, subtree: true, characterData: true });
-    }
-    updateFuelDefaults();
-    refreshContext();
-    return card;
-  }
-
-  if(typeof window !== 'undefined'){
-    window.LotCompanionBAL = Object.freeze({
-      vegetationClasses: BAL_VEGETATION_CLASSES,
-      calculate: calculateBalMethod2,
-      classify: classifyBal,
-      worst: worstBal,
-      init: initBalCalculator
-    });
-  }
-
-  if(typeof document !== 'undefined'){
-    if(document.readyState === 'loading'){
-      document.addEventListener('DOMContentLoaded', initBalCalculator, { once: true });
-    }else{
-      initBalCalculator();
-    }
-  }
-
   // Shared low-level helpers for the independent council page brains.
   // Council-specific map, report, and access-flow decisions stay in Js/councils/*.js.
 
@@ -1522,77 +829,12 @@
     }
   };
 
-  const QUEENSLAND_FFDI_LAYER_URL =
-    'https://gis.fire.qld.gov.au/arcgis/rest/services/Redi/FFDI_h20/MapServer/0';
-
-  const queenslandFfdiLayers = new WeakMap();
-
-  const queenslandFfdiRenderer = () => ({
-    type: 'class-breaks',
-    field: 'ffdi',
-    defaultLabel: 'FFDI below 25',
-    defaultSymbol: {
-      type: 'simple-fill',
-      color: [255, 237, 160, 90],
-      outline: { color: [110, 88, 28, 180], width: 0.5 }
-    },
-    classBreakInfos: [
-      {
-        minValue: 25,
-        maxValue: 49,
-        label: 'Very High (FFDI 25–49)',
-        symbol: { type: 'simple-fill', color: [255, 214, 102, 118], outline: { color: [184, 126, 0, 210], width: 0.6 } }
-      },
-      {
-        minValue: 50,
-        maxValue: 74,
-        label: 'Severe (FFDI 50–74)',
-        symbol: { type: 'simple-fill', color: [255, 145, 52, 126], outline: { color: [194, 74, 0, 220], width: 0.65 } }
-      },
-      {
-        minValue: 75,
-        maxValue: 99,
-        label: 'Extreme (FFDI 75–99)',
-        symbol: { type: 'simple-fill', color: [219, 49, 36, 132], outline: { color: [146, 16, 10, 225], width: 0.7 } }
-      },
-      {
-        minValue: 100,
-        maxValue: 999,
-        label: 'Catastrophic (FFDI 100+)',
-        symbol: { type: 'simple-fill', color: [92, 31, 117, 140], outline: { color: [52, 13, 70, 230], width: 0.75 } }
-      }
-    ]
-  });
-
   const isQueenslandFfdiLayer = node => {
     if (!node) return false;
-    if (String(node.id || '').toLowerCase() === 'lotwise-qld-ffdi') return true;
-    return /gis\.fire\.qld\.gov\.au\/arcgis\/rest\/services\/Redi\/FFDI_h20\/MapServer(?:\/0)?\b/i
-      .test(String(node.url || ''));
-  };
-
-  const findQueenslandFfdiLayer = map => {
-    let match = null;
-    const seen = new Set();
-    const visit = node => {
-      if (!node || seen.has(node) || match) return;
-      seen.add(node);
-      if (isQueenslandFfdiLayer(node)) {
-        match = node;
-        return;
-      }
-      for (const key of ['layers', 'sublayers']) {
-        const collection = node[key];
-        if (!collection) continue;
-        try {
-          if (typeof collection.toArray === 'function') collection.toArray().forEach(visit);
-          else if (Array.isArray(collection)) collection.forEach(visit);
-          else if (typeof collection.forEach === 'function') collection.forEach(visit);
-        } catch {}
-      }
-    };
-    visit(map);
-    return match;
+    const text = [node.id, node.title, node.url, node.portalItem?.title]
+      .filter(Boolean)
+      .join(' ');
+    return /(?:\bffdi\b|forest\s+fire\s+danger\s+index|fire\s+danger\s+index|Redi\/FFDI_h20\/MapServer)/i.test(text);
   };
 
   const operationalLayers = node => {
@@ -1613,6 +855,7 @@
 
   const layerListTopLevelCategory = layer => {
     const title = String(layer?.title || '').trim();
+    if (isQueenslandStateBushfireLayer(layer)) return 'state-bushfire';
     if (/\b(?:utilit(?:y|ies|es)|utilis(?:e|es))\b/i.test(title)) return 'utilities';
     if (/\bzoning\b/i.test(title) || /^zones?$/i.test(title)) return 'zoning';
     if (/\bprecincts?\b/i.test(title)) return 'precinct';
@@ -1629,16 +872,43 @@
     try {
       if (typeof parent?.remove === 'function') parent.remove(layer);
       else if (typeof parent?.layers?.remove === 'function') parent.layers.remove(layer);
+      else if (typeof parent?.sublayers?.remove === 'function') parent.sublayers.remove(layer);
     } catch {}
+  };
+
+  const suppressQueenslandFfdiLayers = root => {
+    const visit = (node, parent = null) => {
+      if (!node) return;
+      if (isQueenslandFfdiLayer(node)) {
+        try { node.visible = false; } catch {}
+        try { node.listMode = 'hide'; } catch {}
+        if (parent) removeLayerFromOperationalParent(parent, node);
+        return;
+      }
+      for (const key of ['layers', 'sublayers']) {
+        const collection = node[key];
+        if (!collection) continue;
+        let children = [];
+        try {
+          if (typeof collection.toArray === 'function') children = collection.toArray();
+          else if (Array.isArray(collection)) children = [...collection];
+          else if (typeof collection.forEach === 'function') collection.forEach(child => children.push(child));
+        } catch {}
+        children.forEach(child => visit(child, node));
+      }
+    };
+    visit(root);
   };
 
   /**
    * Keeps the public layer list consistent across council maps. Planning overlays
-   * live in one expandable group; Utilities, Zoning and Precincts stay at root.
+   * live in one expandable group; statewide bushfire, Utilities, Zoning and
+   * Precincts stay at root.
    * Hidden parcel/address/system layers are deliberately left where they are.
    */
   const organizePlanningSchemeLayers = (map, GroupLayer) => {
     if (!map?.layers || typeof GroupLayer !== 'function') return null;
+    suppressQueenslandFfdiLayers(map);
 
     let roots = operationalLayers(map);
     let group = roots.find(layer => layer?.type === 'group' && planningSchemeTitle(layer.title)) || null;
@@ -1699,44 +969,94 @@
     return group;
   };
 
-  const ensureQueenslandFfdiLayer = (map, FeatureLayer, esriConfig) => {
+  const QUEENSLAND_STATE_BUSHFIRE_LAYER_URL =
+    'https://services1.arcgis.com/vkTwD8kHw2woKBqV/arcgis/rest/services/WOS_PIB/FeatureServer/0';
+  const queenslandStateBushfireLayers = new WeakMap();
+
+  const isQueenslandStateBushfireLayer = node => {
+    if (!node) return false;
+    const text = [node.id, node.title, node.url, node.portalItem?.title]
+      .filter(Boolean)
+      .join(' ');
+    return /(?:lotwise-qld-state-bushfire|bushfire[^\n]*\b(?:queensland|state|spp)\b|\b(?:queensland|state|spp)\b[^\n]*bushfire|SPP\/SPP_Data\/MapServer(?:\/77)?\b|Hosted\/BPA\/FeatureServer\/0\b)/i.test(text);
+  };
+
+  const isCanonicalQueenslandStateBushfireLayer = node => {
+    const text = [node?.id, node?.url].filter(Boolean).join(' ');
+    return /(?:lotwise-qld-state-bushfire|Hosted\/BPA\/FeatureServer\/0\b)/i.test(text);
+  };
+
+  const findQueenslandStateBushfireLayer = root => {
+    let match = null;
+    const seen = new Set();
+    const visit = node => {
+      if (!node || match || seen.has(node)) return;
+      seen.add(node);
+      if (node !== root && isCanonicalQueenslandStateBushfireLayer(node)) {
+        match = node;
+        return;
+      }
+      for (const key of ['layers', 'sublayers']) {
+        const collection = node[key];
+        if (!collection) continue;
+        try {
+          const children = typeof collection.toArray === 'function'
+            ? collection.toArray()
+            : (Array.isArray(collection) ? collection : [...collection]);
+          children.forEach(visit);
+        } catch {}
+      }
+    };
+    visit(root);
+    return match;
+  };
+
+  /**
+   * Adds the same Queensland bushfire-prone-area layer used by the Moreton Bay
+   * report when a council map does not already provide its own state layer.
+   */
+  const ensureQueenslandStateBushfireLayer = (map, FeatureLayer) => {
     if (!map || typeof FeatureLayer !== 'function') return null;
-    try {
-      const servers = esriConfig?.request?.corsEnabledServers;
-      if (servers && !servers.includes('gis.fire.qld.gov.au')) servers.push('gis.fire.qld.gov.au');
-    } catch {}
-    let layer = queenslandFfdiLayers.get(map) || findQueenslandFfdiLayer(map);
+    let layer = queenslandStateBushfireLayers.get(map) || findQueenslandStateBushfireLayer(map);
     if (!layer) {
-      layer = new FeatureLayer({
-        id: 'lotwise-qld-ffdi',
-        url: QUEENSLAND_FFDI_LAYER_URL,
-        title: 'Forest Fire Danger Index (FFDI 5% AEP)',
-        listMode: 'show',
-        visible: false,
-        opacity: 0.68,
-        minScale: 0,
-        maxScale: 0,
-        outFields: ['OBJECTID', 'Id', 'ffdi'],
-        popupEnabled: true,
-        popupTemplate: {
-          title: 'Forest Fire Danger Index',
-          content: [{
-            type: 'fields',
-            fieldInfos: [{ fieldName: 'ffdi', label: 'FFDI', format: { places: 0, digitSeparator: true } }]
-          }]
-        },
-        renderer: queenslandFfdiRenderer()
-      });
-      const planningGroup = operationalLayers(map)
-        .find(candidate => candidate?.type === 'group' && planningSchemeTitle(candidate.title));
-      try { (planningGroup || map).add(layer); } catch { return null; }
-    } else {
-      try { layer.listMode = 'show'; } catch {}
-      try { layer.minScale = 0; layer.maxScale = 0; } catch {}
-      try { layer.renderer = queenslandFfdiRenderer(); } catch {}
+      try {
+        layer = new FeatureLayer({
+          id: 'lotwise-qld-state-bushfire',
+          url: QUEENSLAND_STATE_BUSHFIRE_LAYER_URL,
+          title: 'Bushfire - Queensland State Mapping',
+          listMode: 'show',
+          visible: false,
+          opacity: 0.62,
+          minScale: 0,
+          maxScale: 0,
+          outFields: ['fid', 'class'],
+          popupEnabled: false
+        });
+        if (typeof map.add === 'function') map.add(layer);
+        else if (typeof map.layers?.add === 'function') map.layers.add(layer);
+      } catch {
+        return null;
+      }
+      queenslandStateBushfireLayers.set(map, layer);
     }
-    queenslandFfdiLayers.set(map, layer);
+    try { layer.title = 'Bushfire - Queensland State Mapping'; } catch {}
+    try { layer.listMode = 'show'; } catch {}
+    try { layer.visible = false; } catch {}
+    try { layer.opacity = 0.62; } catch {}
+    try { layer.minScale = 0; layer.maxScale = 0; } catch {}
     return layer;
+  };
+
+  /** Attach the statewide bushfire overlay after each council map is ready. */
+  const scheduleQueenslandStateBushfireLayer = (resolveMap, FeatureLayer) => {
+    const attach = () => {
+      try {
+        const map = typeof resolveMap === 'function' ? resolveMap() : resolveMap;
+        if (map?.layers) ensureQueenslandStateBushfireLayer(map, FeatureLayer);
+      } catch {}
+    };
+    [0, 400, 1200, 3500].forEach(delay => setTimeout(attach, delay));
+    return attach;
   };
 
   // Transport-noise layers are authored differently by each council. Some use a
@@ -1744,6 +1064,8 @@
   // matching and traversal in one place so reports do not depend on a particular
   // portal item's naming or nesting convention.
   const TRANSPORT_NOISE_CORRIDOR_PATTERN = /(?:\btransport[\s_-]*noise[\s_-]*corridors?\b|\bnoise[\s_-]*corridors?\b|\bstate[\s_-]*designated[\s_-]*noise\b|\bstate.*road.*noise\b|\broad.*traffic.*noise\b|\btmr.*noise\b|\bacoustic.*corridor\b|\bqdc\s*(?:mp\s*)?4\.4\s*noise\b|\bmp\s*4\.4\s*noise\b|\btnc(?:\b|[_-]))/i;
+  const STATE_TRANSPORT_NOISE_CORRIDOR_PATTERN = /(?:\bqueensland\s+state\b|\bstate\s+mapping\b|\bstate[\s_-]*(?:controlled|designated)\b|\bstate\s+road\b|\btmr\b|\btransport\s+chief\s+executive\b|\bmandatory\b|\bvoluntary\b|\brail(?:way|\s+network)?\b)/i;
+  const LOCAL_TRANSPORT_NOISE_CORRIDOR_PATTERN = /(?:\blocal\s+mapping\b|\blocal\s+government\s+road\b|\bcouncil[\s_-]*designated\b|\bbrisbane\s+road\b)/i;
 
   const isTransportNoiseCorridorText = (...values) => {
     const text = values.flat(Infinity).filter(Boolean).join(' ');
@@ -1765,6 +1087,152 @@
 
   const isTransportNoiseCorridorNode = (node, path = '') =>
     !!node && isTransportNoiseCorridorText(path, transportNoiseNodeText(node));
+
+  const transportNoiseParentPath = node => {
+    const parts = [];
+    const seen = new Set();
+    let current = node?.parent;
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      parts.unshift(current.title || current.name || current.id || '');
+      current = current.parent;
+    }
+    return parts.filter(Boolean).join(' / ');
+  };
+
+  const transportNoiseCorridorNodeScope = node => {
+    const text = [...transportNoiseNodeText(node), transportNoiseParentPath(node)]
+      .flat(Infinity)
+      .filter(Boolean)
+      .join(' ');
+    if (STATE_TRANSPORT_NOISE_CORRIDOR_PATTERN.test(text)) return 'state';
+    if (LOCAL_TRANSPORT_NOISE_CORRIDOR_PATTERN.test(text)) return 'local';
+    return 'combined';
+  };
+
+  const transportNoiseRendererKeyText = (node, feature) => {
+    const renderer = node?.renderer;
+    const attrs = feature?.attributes || {};
+    if (!renderer) return '';
+
+    if (renderer.type === 'unique-value') {
+      const fields = [renderer.field, renderer.field1, renderer.field2, renderer.field3]
+        .filter(Boolean);
+      const actual = fields.map(field => String(attrs[field] ?? ''));
+      const delimiter = String(renderer.fieldDelimiter || ', ');
+      const composite = actual.join(delimiter);
+      const infos = [
+        ...(renderer.uniqueValueInfos || []),
+        ...((renderer.uniqueValueGroups || []).flatMap(group => group.uniqueValueInfos || []))
+      ];
+      const match = infos.find(info => {
+        if (Array.isArray(info.values)) {
+          return info.values.some(value => {
+            const candidate = Array.isArray(value)
+              ? value.map(part => String(part ?? '')).join(delimiter)
+              : String(value ?? '');
+            return candidate === composite || actual.includes(candidate);
+          });
+        }
+        const candidate = String(info.value ?? '');
+        return candidate === composite || actual.includes(candidate);
+      });
+      if (match) return [match.label, match.value, match.values].flat(Infinity).filter(Boolean).join(' ');
+    }
+
+    if (renderer.type === 'class-breaks' && renderer.field) {
+      const value = Number(attrs[renderer.field]);
+      const match = (renderer.classBreakInfos || []).find(info => {
+        const min = info.minValue == null ? -Infinity : Number(info.minValue);
+        const max = info.maxValue == null ? Infinity : Number(info.maxValue);
+        return Number.isFinite(value) && value >= min && value <= max;
+      });
+      if (match) return String(match.label || '');
+    }
+
+    return String(renderer.label || renderer.defaultLabel || '');
+  };
+
+  const transportNoiseCorridorFeatureKeyText = (node, feature) => {
+    const attrs = feature?.attributes || {};
+    const keyAttributes = Object.entries(attrs)
+      .filter(([name, value]) => value != null && /(?:noise|category|class|type|source|designation|description|label|name|overlay|corridor|road|rail|state|local)/i.test(name))
+      .map(([, value]) => String(value));
+    return [transportNoiseRendererKeyText(node, feature), ...keyAttributes]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+  };
+
+  /**
+   * Reduce zoning legend candidates to the class covering the greatest area of
+   * the selected lot. Features sharing the same key are totalled together so a
+   * zone split into several polygons still competes by its combined coverage.
+   */
+  function selectDominantPolygonLegendFeatures(
+    features,
+    lotGeometry,
+    geometryEngine,
+    keyForFeature = null
+  ) {
+    const candidates = Array.isArray(features) ? features.filter(Boolean) : [];
+    if (candidates.length <= 1 || !lotGeometry || !geometryEngine?.intersect) return candidates;
+
+    const coverageByKey = new Map();
+    let measured = false;
+    candidates.forEach((feature, index) => {
+      const geometry = feature?.geometry;
+      if (!geometry || String(geometry.type || '').toLowerCase() !== 'polygon') return;
+      try {
+        const overlap = geometryEngine.intersect(geometry, lotGeometry);
+        if (!overlap) return;
+        let area = Number.NaN;
+        if (typeof geometryEngine.geodesicArea === 'function') {
+          try { area = Math.abs(Number(geometryEngine.geodesicArea(overlap, 'square-meters'))); } catch {}
+        }
+        if ((!Number.isFinite(area) || area <= 0) && typeof geometryEngine.planarArea === 'function') {
+          try { area = Math.abs(Number(geometryEngine.planarArea(overlap, 'square-meters'))); } catch {}
+        }
+        if (!Number.isFinite(area) || area <= 0) return;
+        measured = true;
+        let rawKey = null;
+        if (typeof keyForFeature === 'function') {
+          try { rawKey = keyForFeature(feature); } catch {}
+        }
+        const key = String(rawKey || `__feature_${index}`);
+        const entry = coverageByKey.get(key) || { area: 0, largestPiece: -1, feature };
+        entry.area += area;
+        if (area > entry.largestPiece) {
+          entry.largestPiece = area;
+          entry.feature = feature;
+        }
+        coverageByKey.set(key, entry);
+      } catch {}
+    });
+
+    if (!measured || !coverageByKey.size) return candidates;
+    let dominant = null;
+    for (const entry of coverageByKey.values()) {
+      if (!dominant || entry.area > dominant.area) dominant = entry;
+    }
+    return dominant?.feature ? [dominant.feature] : candidates;
+  }
+
+  /** Classify an intersecting TNC feature from its displayed key item first. */
+  const transportNoiseCorridorFeatureScope = (node, feature) => {
+    // The visible key item is authoritative. This prevents an incidental field
+    // value on the feature or a broad parent-layer title from overriding it.
+    const rendererKeyText = transportNoiseRendererKeyText(node, feature);
+    if (STATE_TRANSPORT_NOISE_CORRIDOR_PATTERN.test(rendererKeyText)) return 'state';
+    if (LOCAL_TRANSPORT_NOISE_CORRIDOR_PATTERN.test(rendererKeyText)) return 'local';
+    const keyText = transportNoiseCorridorFeatureKeyText(node, feature);
+    if (STATE_TRANSPORT_NOISE_CORRIDOR_PATTERN.test(keyText)) return 'state';
+    if (LOCAL_TRANSPORT_NOISE_CORRIDOR_PATTERN.test(keyText)) return 'local';
+    const nodeScope = transportNoiseCorridorNodeScope(node);
+    if (nodeScope !== 'combined') return nodeScope;
+    // A combined TNC layer's non-state key items are council/local mapping.
+    return 'local';
+  };
 
   /**
    * Return every renderable TNC leaf, including layers placed under hidden
@@ -1811,6 +1279,28 @@
     return results;
   }
 
+  /**
+   * Council services often publish local and state TNC classes in one combined
+   * layer. Combined layers therefore belong in both report sections; explicitly
+   * state- or local-designated leaves are kept in their matching section only.
+   */
+  async function collectLocalTransportNoiseCorridorDisplayNodes(root, options = {}) {
+    const nodes = await collectTransportNoiseCorridorDisplayNodes(root, options);
+    return nodes.filter(node => transportNoiseCorridorNodeScope(node) !== 'state');
+  }
+
+  async function collectStateTransportNoiseCorridorDisplayNodes(root, options = {}) {
+    const nodes = await collectTransportNoiseCorridorDisplayNodes(root, options);
+    return nodes.filter(node => transportNoiseCorridorNodeScope(node) !== 'local');
+  }
+
+  const transportNoiseReportScope = title => {
+    const text = String(title || '');
+    if (/\blocal\s+mapping\b/i.test(text)) return 'local';
+    if (/\b(?:queensland\s+)?state\s+mapping\b/i.test(text)) return 'state';
+    return 'all';
+  };
+
   const reportNodeArray = value => {
     if (!value) return [];
     if (Array.isArray(value)) return value.filter(Boolean);
@@ -1827,12 +1317,19 @@
    * the useful leaf layers inside hidden groups. Loading and merging those leaves
    * here also ensures their renderers exist before the report key is generated.
    */
-  async function prepareMandatoryOverlayReportSection(root, title, collectorFn) {
+  async function prepareMandatoryOverlayReportSection(root, title, collectorFn, { geometry = null } = {}) {
     const collected = typeof collectorFn === 'function' ? await collectorFn() : [];
     let nodes = reportNodeArray(collected);
     const transportNoise = isTransportNoiseCorridorText(title);
+    const utilities = /^\s*utilities\s*$/i.test(String(title || ''));
+    let tncObjectIdsByNode = null;
+    let tncMatchCount = null;
 
     if (transportNoise) {
+      const scope = transportNoiseReportScope(title);
+      // Always inspect every TNC leaf. A single council layer can contain both
+      // State and Local key classes, so the intersecting key—not the layer title—
+      // determines which report section receives each feature.
       const sharedNodes = await collectTransportNoiseCorridorDisplayNodes(root);
       nodes = [...new Set([...nodes, ...sharedNodes])];
       await Promise.all(nodes.map(async node => {
@@ -1848,6 +1345,30 @@
           if (timer) clearTimeout(timer);
         }
       }));
+
+      if ((scope === 'local' || scope === 'state') && geometry) {
+        tncObjectIdsByNode = new Map();
+        tncMatchCount = 0;
+        const scopedNodes = [];
+        for (const node of nodes) {
+          const hits = await queryStrictOverlayFeatureHits(node, geometry);
+          const oidField = node?.objectIdField
+            || (node?.fields || []).find(field => String(field?.type || '').toLowerCase() === 'oid')?.name;
+          if (!oidField) continue;
+          const ids = [];
+          for (const feature of hits.features || []) {
+            if (transportNoiseCorridorFeatureScope(node, feature) !== scope) continue;
+            const id = Number(feature?.attributes?.[oidField]);
+            if (Number.isFinite(id)) ids.push(id);
+          }
+          const uniqueIds = [...new Set(ids)];
+          if (!uniqueIds.length) continue;
+          tncObjectIdsByNode.set(node, uniqueIds);
+          tncMatchCount += uniqueIds.length;
+          scopedNodes.push(node);
+        }
+        nodes = scopedNodes;
+      }
     }
 
     return {
@@ -1857,12 +1378,42 @@
         // TNC keys must come only from features that intersect the selected lot.
         // Keep hidden source leaves queryable without falling back to every
         // class exposed by their renderer.
-        legendAllRendererItems: false,
+        legendAllRendererItems: utilities,
+        legendUseExtent: utilities,
         legendIncludeHiddenNodes: transportNoise,
-        legendStrictLotIntersection: transportNoise
+        legendStrictLotIntersection: transportNoise,
+        tncObjectIdsByNode,
+        tncMatchCount
       }
     };
   }
+
+  /** Temporarily restrict combined TNC layers to the key items for one scope. */
+  const applyTransportNoiseCorridorFeatureFilter = (nodes, objectIdsByNode) => {
+    if (!(objectIdsByNode instanceof Map)) return () => {};
+    const snapshots = [];
+    for (const node of reportNodeArray(nodes)) {
+      if (!objectIdsByNode.has(node)) continue;
+      const oidField = node?.objectIdField
+        || (node?.fields || []).find(field => String(field?.type || '').toLowerCase() === 'oid')?.name;
+      if (!oidField || !('definitionExpression' in node)) continue;
+      const ids = objectIdsByNode.get(node) || [];
+      const previous = node.definitionExpression || '';
+      const scoped = ids.length ? `${oidField} IN (${ids.join(',')})` : '1=0';
+      try {
+        snapshots.push([node, node.definitionExpression]);
+        node.definitionExpression = previous ? `(${previous}) AND (${scoped})` : scoped;
+      } catch {}
+    }
+    let restored = false;
+    return () => {
+      if (restored) return;
+      restored = true;
+      for (const [node, previous] of snapshots) {
+        try { node.definitionExpression = previous; } catch {}
+      }
+    };
+  };
 
   /**
    * Resolve the exact features touching a selected lot without changing the
@@ -1929,6 +1480,134 @@
     const text = String(value ?? '').trim();
     return text && text !== '--' ? text : '';
   };
+
+  const DEFAULT_UTILITY_LAYER_PATTERN = /\b(?:utilit(?:y|ies)|power|electric|telecom|gas|water|sewer|storm[-\s]?water|reticulation)\b/i;
+
+  const utilityNodePath = node => {
+    const parts = [];
+    for (let current = node; current; current = current.parent) {
+      parts.unshift(current.title || current.id || '');
+    }
+    return parts.filter(Boolean).join(' / ');
+  };
+
+  const defaultUtilityMapNode = node => {
+    if (!node) return false;
+    const tags = node.portalItem?.tags || node.tags || [];
+    const text = [
+      node.title,
+      node.id,
+      Array.isArray(tags) ? tags.join(' ') : tags,
+      utilityNodePath(node)
+    ].filter(Boolean).join(' ');
+    return DEFAULT_UTILITY_LAYER_PATTERN.test(text);
+  };
+
+  const utilityPopupTemplate = (graphic, node) => {
+    const attributes = graphic?.attributes || {};
+    const fields = Array.isArray(node?.fields) ? node.fields : [];
+    const fieldsByName = new Map(fields.map(field => [field.name, field]));
+    const fieldInfos = Object.keys(attributes)
+      .filter(name => {
+        const type = String(fieldsByName.get(name)?.type || '').toLowerCase();
+        return !['geometry', 'blob', 'raster'].includes(type);
+      })
+      .map(name => ({
+        fieldName: name,
+        label: fieldsByName.get(name)?.alias || name,
+        visible: true
+      }));
+    return {
+      title: node?.title || 'Utility details',
+      content: fieldInfos.length
+        ? [{ type: 'fields', fieldInfos }]
+        : 'No utility attributes are available for this feature.'
+    };
+  };
+
+  /**
+   * Open the clicked utility feature before a council's parcel click handler runs.
+   * Councils supply their own utility nodes; the shared fallback recognises common
+   * utility layer names for older maps that do not expose a utility-node getter.
+   */
+  async function showUtilityInfoPopup(view, event, {
+    enabled = true,
+    utilityNodes = [],
+    isUtilityNode = null
+  } = {}) {
+    if (!enabled || !view || !event) return false;
+    try { event.stopPropagation?.(); } catch {}
+
+    let hitResponse;
+    try {
+      hitResponse = await view.hitTest(event);
+    } catch {
+      return false;
+    }
+
+    let suppliedNodes = utilityNodes;
+    try {
+      if (typeof suppliedNodes === 'function') suppliedNodes = suppliedNodes();
+    } catch {
+      suppliedNodes = [];
+    }
+    suppliedNodes = Array.from(suppliedNodes || []).filter(Boolean);
+    const suppliedSet = new Set(suppliedNodes);
+    const suppliedIds = new Set(suppliedNodes.map(node => node.id).filter(Boolean));
+
+    const suppliedNodeMatches = node => {
+      for (let current = node; current; current = current.parent) {
+        if (suppliedSet.has(current) || (current.id && suppliedIds.has(current.id))) return true;
+      }
+      return false;
+    };
+    const nodeMatches = node => {
+      if (!node) return false;
+      try {
+        if (typeof isUtilityNode === 'function' && isUtilityNode(node)) return true;
+      } catch {}
+      return suppliedNodes.length ? suppliedNodeMatches(node) : defaultUtilityMapNode(node);
+    };
+
+    const hits = (hitResponse?.results || [])
+      .map(result => {
+        const graphic = result?.graphic;
+        const candidates = [graphic?.sourceLayer, graphic?.layer, result?.layer].filter(Boolean);
+        return { graphic, node: candidates.find(nodeMatches) || null };
+      })
+      .filter(({ graphic, node }) => graphic && node);
+    if (!hits.length) return false;
+
+    const features = [];
+    const seen = new Set();
+    hits.forEach(({ graphic, node }) => {
+      const oidField = node.objectIdField
+        || (node.fields || []).find(field => String(field?.type || '').toLowerCase() === 'oid')?.name;
+      const oid = oidField ? graphic.attributes?.[oidField] : null;
+      const key = `${node.id || node.title || 'utility'}:${oid ?? features.length}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      if (!graphic.popupTemplate) {
+        graphic.popupTemplate = node.popupTemplate || utilityPopupTemplate(graphic, node);
+      }
+      features.push(graphic);
+    });
+    if (!features.length) return false;
+
+    try {
+      const options = { location: event.mapPoint, features };
+      if (typeof view.openPopup === 'function') {
+        await Promise.resolve(view.openPopup(options));
+      } else if (view.popup && typeof view.popup.open === 'function') {
+        view.popup.open(options);
+      } else {
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   /** Show the same selected-property information bubble on every council map. */
   function showPropertyInfoPopup(view, info = {}, { location = null } = {}) {
@@ -2388,6 +2067,223 @@
     }
   };
 
+  const parseLotPlanReference = value => {
+    const text=String(value||"").trim();
+    if(!text || text==="--") return null;
+    const slashMatch=text.match(/^\s*(?:lot\s+)?([^/]+?)\s*\/\s*([^/\s]+)\s*$/i);
+    if(slashMatch) return {lot:slashMatch[1].trim(),plan:slashMatch[2].trim()};
+    const onMatch=text.match(/^\s*lot\s+(.+?)\s+on\s+([^\s]+)\s*$/i);
+    if(onMatch) return {lot:onMatch[1].trim(),plan:onMatch[2].trim()};
+    const compact=text.replace(/[^A-Za-z0-9]/g,"").match(/^(\d+)([A-Za-z]{1,6}\d+[A-Za-z0-9]*)$/);
+    return compact ? {lot:compact[1],plan:compact[2]} : null;
+  };
+
+  function buildInteractivePropertyMapUrl({pageUrl,lotPlan,lot,plan}={}){
+    const parsed=lot&&plan ? {lot:String(lot).trim(),plan:String(plan).trim()} : parseLotPlanReference(lotPlan);
+    if(!parsed?.lot || !parsed?.plan || !pageUrl) return null;
+    try{
+      const url=new URL(String(pageUrl));
+      if(!/^(?:https?:|file:)$/.test(url.protocol)) return null;
+      url.pathname=url.pathname.replace(/\/__va-report-ui\//i,"/");
+      url.search="";
+      url.hash="";
+      url.searchParams.set("interactiveMap","1");
+      url.searchParams.set("mapOnly","1");
+      url.searchParams.set("lot",parsed.lot);
+      url.searchParams.set("plan",parsed.plan);
+      return url.href;
+    }catch{
+      return null;
+    }
+  }
+
+  const interactiveMapLayerItems = collection => {
+    if(!collection) return [];
+    if(typeof collection.toArray==="function") return collection.toArray();
+    try{ return Array.from(collection); }catch{ return []; }
+  };
+
+  const interactiveMapLayerChildren = layer => {
+    const layers=interactiveMapLayerItems(layer?.layers);
+    const sublayers=interactiveMapLayerItems(layer?.sublayers);
+    return layers.length ? layers : sublayers;
+  };
+
+  const normaliseInteractiveLayerTitle = value => String(value||"")
+    .toLowerCase()
+    .replace(/&/g," and ")
+    .replace(/[^a-z0-9]+/g," ")
+    .trim();
+
+  const interactiveOverlayPattern = title => {
+    const value=normaliseInteractiveLayerTitle(title);
+    if(!value || value==="property") return null;
+    if(/zoning|zone/.test(value)) return /\b(?:zoning|zone|precinct)\b/i;
+    if(/neighbou?rhood/.test(value)) return /neighbou?rhood|local plan/i;
+    if(/utilit|water|sewer|stormwater/.test(value)) return /utilit|water|sewer|stormwater|drainage/i;
+    if(/acid/.test(value)) return /acid/i;
+    if(/transport/.test(value)) return /transport|road|rail|airport|corridor/i;
+    if(/air quality/.test(value)) return /air quality/i;
+    if(/noise|acoustic/.test(value)) return /noise|acoustic/i;
+    if(/bushfire|fire danger|ffdi/.test(value)) return /bushfire|fire danger|ffdi/i;
+    if(/flood/.test(value)) return /flood|overland flow|storm tide/i;
+    if(/heritage/.test(value)) return /heritage/i;
+    if(/biodiversity|ecology|environment|vegetation/.test(value)) return /biodiversity|ecolog|environment|vegetation|habitat/i;
+    const words=value.split(/\s+/).filter(word=>word.length>2);
+    return words.length ? new RegExp(words.map(word=>word.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join(".*"),"i") : null;
+  };
+
+  function applyInteractiveReportOverlay(view,{overlayTitle,layerTitles,selectionLayer}={}){
+    const map=view?.map;
+    if(!map) return {matched:0};
+    const requested=new Set((Array.isArray(layerTitles)?layerTitles:[])
+      .map(normaliseInteractiveLayerTitle)
+      .filter(Boolean));
+    const fallbackPattern=requested.size ? null : interactiveOverlayPattern(overlayTitle);
+    let matched=0;
+
+    const selectNode=(node,ancestorSelected=false)=>{
+      if(!node) return false;
+      const title=normaliseInteractiveLayerTitle(node.title||node.id);
+      const selfSelected=ancestorSelected || requested.has(title) || (!!fallbackPattern && fallbackPattern.test(title));
+      const children=interactiveMapLayerChildren(node);
+      let childSelected=false;
+      for(const child of children){
+        if(selectNode(child,selfSelected)) childSelected=true;
+      }
+      const keepSelection=node===selectionLayer;
+      const selected=keepSelection || selfSelected || childSelected;
+      if(selfSelected && !ancestorSelected) matched+=1;
+      if("visible" in node){
+        try{ node.visible=selected; }catch{}
+      }
+      if(selected && ("minScale" in node || "maxScale" in node)){
+        try{ node.minScale=0; node.maxScale=0; }catch{}
+      }
+      return selected;
+    };
+
+    for(const layer of interactiveMapLayerItems(map.layers)) selectNode(layer,false);
+    try{ if(selectionLayer) selectionLayer.visible=true; }catch{}
+    try{ view.requestUpdate?.(); }catch{}
+    return {matched};
+  }
+
+  function prepareInteractiveMapOnlyDocument(windowRef=typeof window!=="undefined"?window:null){
+    const documentRef=windowRef?.document;
+    if(!documentRef?.documentElement) return false;
+    documentRef.documentElement.classList.add("lot-wise-map-only-pending");
+    if(!documentRef.getElementById("lotWiseMapOnlyStyles")){
+      const style=documentRef.createElement("style");
+      style.id="lotWiseMapOnlyStyles";
+      style.textContent=`
+        html.lot-wise-map-only-pending,
+        html.lot-wise-map-only-pending body{
+          width:100%!important;
+          height:100%!important;
+          margin:0!important;
+          overflow:hidden!important;
+          background:#e8eaed!important;
+        }
+        html.lot-wise-map-only-pending body>*{visibility:hidden!important}
+        html.lot-wise-map-only-pending #viewDiv,
+        html.lot-wise-map-only-pending #viewDiv *,
+        html.lot-wise-map-only-pending #accessGate,
+        html.lot-wise-map-only-pending #accessGate *{visibility:visible!important}
+        html.lot-wise-map-only #viewDiv .esri-ui-top-left,
+        html.lot-wise-map-only #viewDiv .esri-ui-top-right,
+        html.lot-wise-map-only #viewDiv .esri-ui-bottom-left,
+        html.lot-wise-map-only #viewDiv .esri-popup{display:none!important}
+      `;
+      (documentRef.head||documentRef.documentElement).appendChild(style);
+    }
+    return true;
+  }
+
+  function isolateInteractiveMapDocument(windowRef=typeof window!=="undefined"?window:null){
+    const documentRef=windowRef?.document;
+    const viewDiv=documentRef?.getElementById("viewDiv");
+    if(!documentRef || !viewDiv) return false;
+    const accessGate=documentRef.getElementById("accessGate");
+    const accessBlocked=accessGate && accessGate.classList.contains("active") && accessGate.getAttribute("aria-hidden")!=="true";
+    if(accessBlocked && windowRef.__LOT_WISE_PAYWALL_ENABLED__!==false) return false;
+
+    let current=viewDiv;
+    while(current && current!==documentRef.body){
+      const parent=current.parentElement;
+      if(!parent) break;
+      for(const sibling of parent.children){
+        if(sibling!==current) sibling.style.setProperty("display","none","important");
+      }
+      current.style.setProperty("display","block","important");
+      current.style.setProperty("position","fixed","important");
+      current.style.setProperty("inset","0","important");
+      current.style.setProperty("width","100%","important");
+      current.style.setProperty("height","100%","important");
+      current.style.setProperty("min-width","0","important");
+      current.style.setProperty("min-height","0","important");
+      current.style.setProperty("margin","0","important");
+      current.style.setProperty("padding","0","important");
+      current.style.setProperty("overflow","hidden","important");
+      current=parent;
+    }
+    documentRef.documentElement.style.cssText="width:100%;height:100%;margin:0;overflow:hidden";
+    documentRef.body.style.cssText="width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#e8eaed";
+    documentRef.documentElement.classList.remove("lot-wise-map-only-pending");
+    documentRef.documentElement.classList.add("lot-wise-map-only");
+    windowRef.dispatchEvent(new Event("resize"));
+    windowRef.setTimeout(()=>windowRef.dispatchEvent(new Event("resize")),250);
+    return true;
+  }
+
+  function focusInteractivePropertyMapFromQuery(windowRef=typeof window!=="undefined"?window:null){
+    try{
+      if(!windowRef?.location) return false;
+      const params=new URLSearchParams(windowRef.location.search||"");
+      if(params.get("interactiveMap")!=="1") return false;
+      const lot=params.get("lot")?.trim();
+      const plan=params.get("plan")?.trim();
+      const mapOnly=params.get("mapOnly")==="1";
+      const overlayTitle=params.get("overlay")?.trim()||"property";
+      const layerTitles=params.getAll("layer").map(value=>value.trim()).filter(Boolean);
+      if(!lot || !plan) return false;
+      if(mapOnly) prepareInteractiveMapOnlyDocument(windowRef);
+      const schedule=typeof windowRef.setTimeout==="function"
+        ? windowRef.setTimeout.bind(windowRef)
+        : setTimeout;
+      const startedAt=Date.now();
+      let invoked=false;
+      const tryFocus=()=>{
+        const automation=windowRef.__LOT_WISE_REPORT_AUTOMATION__;
+        const focus=automation?.focusOnLotPlan;
+        if(typeof focus!=="function"){
+          if(Date.now()-startedAt<300000) schedule(tryFocus,200);
+          return;
+        }
+        if(invoked) return;
+        invoked=true;
+        Promise.resolve(focus(lot,plan)).then(focused=>{
+          if(!focused) return;
+          const view=automation.getView?.();
+          applyInteractiveReportOverlay(view,{
+            overlayTitle,
+            layerTitles,
+            selectionLayer:automation.getSelectionLayer?.()
+          });
+          if(mapOnly) isolateInteractiveMapDocument(windowRef);
+        }).catch(error=>{
+          try{ console.warn("Could not focus the interactive report map:",error); }catch{}
+        });
+      };
+      tryFocus();
+      return true;
+    }catch{
+      return false;
+    }
+  }
+
+  if(typeof window!=="undefined") focusInteractivePropertyMapFromQuery(window);
+
   const formatRemaining = ms => {
     if (ms < 0) ms = 0;
     const total = Math.floor(ms / 1000);
@@ -2617,6 +2513,20 @@
     return `${amount.toLocaleString("en-AU",{maximumFractionDigits:2})} ${unitText}`;
   };
 
+  const STATE_REPORT_MAPPING_PATTERN = /(?:\bstate(?:wide)?\b|\bqueensland\b|\bqld\b|\bstate\s+planning\s+policy\b|\bspp\b|\bqdc\b|\btmr\b)/i;
+  const LOCAL_REPORT_MAPPING_PATTERN = /(?:\blocal\s+mapping\b|\blocal\s+planning\s+scheme\b|\bcouncil\s+mapping\b)/i;
+
+  const propertyReportMappingScope = shot => {
+    const explicitScope=String(shot?.mappingScope||shot?.mappingType||"").trim().toLowerCase();
+    if(explicitScope==="state" || explicitScope==="local") return explicitScope;
+    const searchableText=[shot?.title,shot?.note]
+      .filter(Boolean)
+      .join(" ")
+      .replace(/<[^>]*>/g," ");
+    if(LOCAL_REPORT_MAPPING_PATTERN.test(searchableText)) return "local";
+    return STATE_REPORT_MAPPING_PATTERN.test(searchableText) ? "state" : "local";
+  };
+
   function composeLandscapePropertyReport({
         title,
         address,
@@ -2634,7 +2544,8 @@
         floodAuthority,
         renderScale,
         planningLink,
-        daSearchUrl
+        daSearchUrl,
+        interactiveMapUrl
       }){
         const esc=htmlEsc;
         const scaleHTML=typeof renderScale==="function" ? renderScale : (shot=>shot?.scaleText ? `<div class="map-scale">${esc(shot.scaleText)}</div>` : "");
@@ -2645,6 +2556,31 @@
         const safeAddress=resolvedAddress || (lot && lot!=="--" ? `Lot ${lot}, ${council}` : "Property report");
         const displayAddress=resolvedAddress || "Address unavailable";
         const currentDaSearchUrl=daSearchUrl||buildDevelopmentApplicationSearchUrl({council,address:resolvedAddress,lot});
+        const currentPageUrl=typeof window!=="undefined" ? window.location?.href : null;
+        const cadastralLot=qscfData?.parcel?.lot;
+        const cadastralPlan=qscfData?.parcel?.plan;
+        const rawInteractiveMapUrl=interactiveMapUrl||buildInteractivePropertyMapUrl({
+          pageUrl:currentPageUrl,
+          lotPlan:lot,
+          lot:cadastralLot,
+          plan:cadastralPlan
+        });
+        const interactiveMapUrlForOverlay=(overlayTitle,layerTitles=[])=>{
+          if(!rawInteractiveMapUrl) return null;
+          try{
+            const url=new URL(rawInteractiveMapUrl,currentPageUrl||undefined);
+            url.searchParams.set("interactiveMap","1");
+            url.searchParams.set("mapOnly","1");
+            url.searchParams.set("overlay",overlayTitle||"property");
+            url.searchParams.delete("layer");
+            [...new Set((Array.isArray(layerTitles)?layerTitles:[]).map(value=>String(value||"").trim()).filter(Boolean))]
+              .slice(0,40)
+              .forEach(value=>url.searchParams.append("layer",value));
+            return url.href;
+          }catch{
+            return rawInteractiveMapUrl;
+          }
+        };
         const when=generatedAt.toLocaleString("en-AU",{day:"numeric",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
         const logoBlack="./images/lot-companion-logo-black.png";
         const logoWhite="./images/lot-companion-logo-white.png";
@@ -2655,11 +2591,26 @@
           ...page,
           id:page.id||`detail-${slug(page.title)||index+1}`
         }));
-        const reportShots=(Array.isArray(shots)?shots:[]).map(shot=>{
-          if(!shot||!/^(?:FFDI|Forest Fire Danger Index(?:\s*\([^)]*\))?)$/i.test(String(shot.title||"").trim())) return shot;
-          return {...shot,title:"Forest Fire Danger Index"};
-        }).filter(Boolean);
-        const totalPages=2+supplementalPages.length+(showFloodWise?1:0)+reportShots.length+1;
+        const scopedReportShots=(Array.isArray(shots)?shots:[])
+          .filter(Boolean)
+          .map(shot=>({...shot,mappingScope:propertyReportMappingScope(shot)}));
+        const reportOverlayLayers=[...new Set(scopedReportShots
+          .flatMap(shot=>Array.isArray(shot.overlayLayers)?shot.overlayLayers:[])
+          .map(value=>String(value||"").trim())
+          .filter(Boolean))];
+        const currentInteractiveMapUrl=interactiveMapUrlForOverlay(
+          reportOverlayLayers.length ? "Report overlays" : "property",
+          reportOverlayLayers
+        );
+        const includeInteractiveMapFrame=!!currentInteractiveMapUrl && !(typeof window!=="undefined" && window.__LOT_WISE_VA_AUTOMATION__===true);
+        const localReportShots=scopedReportShots.filter(shot=>shot.mappingScope!=="state");
+        const stateReportShots=scopedReportShots.filter(shot=>shot.mappingScope==="state");
+        const reportShots=[...localReportShots,...stateReportShots];
+        const mappingSections=[
+          {id:"local-mapping",title:"Local Mapping",description:"Council planning scheme maps and locally sourced overlays.",shots:localReportShots},
+          {id:"state-mapping",title:"State Mapping",description:"Queensland Government mapping and statewide datasets.",shots:stateReportShots}
+        ];
+        const totalPages=2+supplementalPages.length+(showFloodWise?1:0)+reportShots.length+mappingSections.length+1;
         let pageNumber=0;
         const coverAddress=(()=>{
           const parts=String(safeAddress).match(/^(.+?\b(?:Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Court|Ct|Crescent|Cres|Place|Pl|Lane|Ln|Terrace|Tce|Highway|Hwy))[,\s]+(.+)$/i);
@@ -2686,25 +2637,33 @@
           ".cover-head{display:flex;justify-content:space-between;align-items:flex-start;font-size:8px;color:#b8b8b8}.cover-head img{display:block;width:34mm;height:auto}",
           ".cover-title{align-self:center;max-width:152mm;margin-bottom:9mm}.cover-title h1{margin:0;font-size:30px;line-height:1.05;font-weight:800;letter-spacing:-.5px}.cover-rule{width:10mm;height:1mm;margin:8mm 0 6mm;background:#fff}.cover-tagline{margin:0;font-size:18px;font-weight:400;color:#ededed}",
           ".cover-credits{display:grid;grid-template-columns:10mm auto;grid-auto-rows:10mm;align-items:center;column-gap:2mm;font-size:9px;color:#bdbdbd}.cover-credit-icon{width:9mm;height:9mm;border-radius:50%;display:grid;place-items:center;background:#fff;color:#000;font-size:17px;font-weight:800}.cover-credit-icon.brand{border-radius:1.5mm;background:var(--blue);overflow:hidden}.cover-credit-icon.brand img{width:100%;height:100%;object-fit:cover}.cover-credits strong{display:block;color:#fff;font-size:10px;line-height:1.05}",
+          ".mapping-section-page{padding:10mm 11mm 13mm;background:#000;color:#fff;grid-template-rows:18mm minmax(0,1fr) 8mm}.mapping-section-head{display:flex;justify-content:space-between;align-items:flex-start;font-size:8px;color:#b8b8b8}.mapping-section-head img{display:block;width:34mm;height:auto}.mapping-section-title{align-self:center;max-width:180mm;margin-bottom:9mm}.mapping-section-title h1{margin:0;font-size:38px;line-height:1;font-weight:800;letter-spacing:-.6px}.mapping-section-title p{margin:6mm 0 0;font-size:16px;font-weight:400;color:#d7d7d7}.mapping-section-page .page-footer{border-top:.25mm solid #303030}",
           ".page-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10mm;font-size:8px;font-weight:700;white-space:nowrap}.page-header img{display:block;width:32mm;height:auto}.page-header div{padding-top:2.5mm;text-align:right;overflow:hidden;text-overflow:ellipsis}",
           ".page-footer{position:absolute;left:0;right:0;bottom:0;height:10mm;padding:0 10mm;display:flex;align-items:center;justify-content:space-between;gap:8mm;background:#000;color:#fff;font-size:7.5px;font-weight:400}.page-footer span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.page-footer span:last-child{flex:0 0 auto}",
           ".page-content{min-height:0;display:flex;flex-direction:column}.page-title{margin:3.5mm 0 3mm;font-size:23px;line-height:1;font-weight:800;letter-spacing:-.25px}",
           ".property-meta{margin-bottom:3.5mm;font-size:10px}.badges{display:flex;align-items:center;gap:1.5mm;margin-bottom:2.5mm}.badge-pill{display:inline-flex;align-items:center;min-height:6mm;border:.35mm solid #767b82;border-radius:4mm;padding:.6mm 2.2mm;background:#fff;font-size:9px;white-space:nowrap}.property-kv{display:flex;flex-direction:column;gap:1.6mm}",
-          ".property-map{position:relative;min-height:0;flex:1;margin-top:3.5mm;border-radius:4mm;overflow:hidden;background:#e8eaed}.property-map img{display:block;width:100%;height:100%;object-fit:cover}.property-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.88);font-size:7.5px;font-weight:500;color:#111}",
+          ".property-map{position:relative;min-height:0;flex:1;margin-top:3.5mm;border-radius:4mm;overflow:hidden;background:#e8eaed}.property-map-static{display:block;width:100%;height:100%;object-fit:cover;transition:opacity .2s ease}.property-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.88);font-size:7.5px;font-weight:500;color:#111}.interactive-map-frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#e8eaed;opacity:0;transition:opacity .2s ease}.interactive-map-loading{position:absolute;left:50%;top:50%;z-index:3;transform:translate(-50%,-50%);padding:2.2mm 3mm;border-radius:2mm;background:rgba(255,255,255,.94);box-shadow:0 1mm 4mm rgba(0,0,0,.18);font-size:9px;font-weight:800}.interactive-map-toolbar{position:absolute;z-index:4;top:2.5mm;right:2.5mm;display:none;align-items:center;gap:2mm;padding:1.4mm 1.8mm;border-radius:2mm;background:rgba(255,255,255,.94);box-shadow:0 1mm 4mm rgba(0,0,0,.18);font-size:7.5px}.interactive-map-toolbar a{padding:1mm 1.6mm;border-radius:2mm;background:#2054d4;color:#fff;font-weight:800;text-decoration:none}.property-map.interactive-ready .interactive-map-frame{opacity:1}.property-map.interactive-ready .property-map-static,.property-map.interactive-ready>.map-scale{opacity:0}.property-map.interactive-ready .interactive-map-loading{display:none}.property-map.interactive-ready .interactive-map-toolbar{display:flex}",
           ".summary-page .page-title{margin-top:6mm;margin-bottom:6mm}.summary-grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-flow:column;grid-template-rows:repeat(var(--summary-rows),14mm);align-content:start;gap:0 3mm;min-height:0;flex:1;padding-bottom:2mm}.summary-item{position:relative;display:flex;flex-direction:column;justify-content:center;min-width:0;padding:1.4mm 9mm 1.4mm 2mm;border:.3mm solid var(--line);border-bottom:0;text-decoration:none;background:#fff;overflow:hidden}.summary-item.column-end,.summary-item:last-child{border-bottom:.3mm solid var(--line)}.summary-title{font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.summary-count{font-size:8px;font-weight:500}.summary-note{font-size:8px;color:#4c5056;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.summary-chevron{position:absolute;right:3mm;top:50%;width:2.5mm;height:2.5mm;border-top:.55mm solid #111;border-right:.55mm solid #111;transform:translateY(-50%) rotate(45deg)}.summary-empty{padding:5mm;border:.3mm solid var(--line);font-size:11px}",
-          ".overlay-page .page-title{margin-top:5mm;margin-bottom:4mm}.overlay-actions{display:flex;gap:2mm;margin-bottom:3mm}.action-link{display:inline-flex;align-items:center;min-height:6mm;padding:.8mm 2.4mm;border:.3mm solid #777;border-radius:4mm;text-decoration:none;font-size:8px;font-weight:700;background:#fff}.overlay-layout{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(55mm,.8fr);gap:4mm;min-height:0;flex:1}.overlay-map{position:relative;min-height:0;border-radius:4mm;overflow:hidden;background:#e8eaed}.overlay-map>img{display:block;width:100%;height:100%;object-fit:cover}.overlay-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.9);font-size:7.5px;color:#111}",
+          ".overlay-page .page-title{margin-top:5mm;margin-bottom:4mm}.overlay-actions{display:flex;gap:2mm;margin-bottom:3mm}.action-link{display:inline-flex;align-items:center;min-height:6mm;padding:.8mm 2.4mm;border:.3mm solid #777;border-radius:4mm;text-decoration:none;font-size:8px;font-weight:700;background:#fff}.overlay-layout{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(55mm,.8fr);gap:4mm;min-height:0;flex:1}.overlay-map{position:relative;min-height:0;border-radius:4mm;overflow:hidden;background:#e8eaed}.overlay-map>img{display:block;width:100%;height:100%;object-fit:cover}.overlay-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.9);font-size:7.5px;color:#111}.report-panzoom{touch-action:none;cursor:grab;outline:none}.report-panzoom.is-dragging{cursor:grabbing}.report-panzoom:focus-visible{box-shadow:0 0 0 .8mm rgba(32,84,212,.55)}.report-panzoom-image{transform-origin:0 0;will-change:transform;user-select:none;-webkit-user-drag:none}.panzoom-hint{position:absolute;z-index:3;left:2.5mm;top:2.5mm;padding:1.2mm 1.7mm;border-radius:2mm;background:rgba(255,255,255,.92);box-shadow:0 .7mm 2.5mm rgba(0,0,0,.15);font-size:7px;font-weight:700;pointer-events:none}.panzoom-controls{position:absolute;z-index:4;right:2.5mm;top:2.5mm;display:flex;align-items:center;gap:.8mm;padding:1mm;border-radius:2mm;background:rgba(255,255,255,.94);box-shadow:0 .7mm 2.5mm rgba(0,0,0,.18)}.panzoom-controls button{width:7mm;height:7mm;padding:0;border:.3mm solid #8d9299;border-radius:1.5mm;background:#fff;color:#111;font:800 13px/1 'Hanken Grotesk',Arial,sans-serif;cursor:pointer}.panzoom-controls button:hover,.panzoom-controls button:focus-visible{border-color:#2054d4;background:#eef3ff}.panzoom-controls .panzoom-reset{width:auto;min-width:12mm;padding:0 1.6mm;font-size:7px}.panzoom-level{min-width:10mm;text-align:center;font-size:7px;font-weight:800}",
           ".legend-panel{min-height:0;padding:3mm;border:.3mm solid var(--line);border-radius:3mm;overflow-x:hidden;overflow-y:auto;scrollbar-gutter:stable;font-size:9px}.legend-heading{position:sticky;top:-3mm;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:3mm;margin:-3mm -3mm 2mm;padding:2.2mm 3mm;background:#fff;border-bottom:.3mm solid var(--line);font-size:9px}.legend-heading span{color:var(--muted);font-size:7px;font-weight:500}.legend-panel .leg{font-size:8px;line-height:1.3}.legend-panel .row{display:flex;align-items:center;gap:2mm;margin:1.5mm 0}.legend-panel .swbox{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;width:5mm;height:4.5mm;padding:.3mm;border:.3mm solid #9aa0a6;border-radius:.8mm;overflow:hidden;background:#fff}.legend-panel .swbox img,.legend-panel .swbox svg,.legend-panel .swbox canvas{width:100%;height:100%;display:block;object-fit:contain}.dense-legend .leg{font-size:7.2px;line-height:1.2}.dense-legend .row{margin:.9mm 0}.note{display:block;margin:0 0 3mm;padding:2.5mm;border-radius:2mm;background:#f1f2f4;font-size:9px;font-weight:700}",
           ".detail-panel{min-height:0;overflow-y:auto;padding:3mm;border:.3mm solid var(--line);border-radius:3mm;font-size:9px}.detail-panel table{width:100%;border-collapse:collapse}.detail-panel th,.detail-panel td{padding:2mm;border-top:.3mm solid var(--line);vertical-align:top;text-align:left}.detail-panel tbody th{width:30%;color:var(--muted)}.detail-panel thead th{width:auto;color:var(--ink)}.detail-panel section+section{margin-top:3mm}.detail-panel p{margin:0 0 3mm}.detail-panel ul{margin:2mm 0;padding-left:6mm}.detail-panel li{margin:1.5mm 0}.detail-panel a{font-weight:700}",
           ".setback-page{break-inside:avoid-page;page-break-inside:avoid}.setback-page .page-content{min-height:0;overflow:hidden}.setback-page .page-title{flex:0 0 auto;margin-top:5mm;margin-bottom:4mm}.setback-page .detail-panel{min-height:0;max-height:100%;padding:0;border:0;overflow:hidden}.setback-guide{display:flex;min-height:0;max-height:100%;height:100%;flex-direction:column;gap:3mm;overflow:hidden}.setback-intro{display:flex;flex:0 0 auto;align-items:flex-start;justify-content:space-between;gap:8mm;padding:3mm 4mm;border-left:1.2mm solid var(--blue);background:#f1f4f8}.setback-intro p{max-width:128mm;margin:0;font-size:10px;line-height:1.35;color:#3f454d;overflow-wrap:anywhere}.setback-intro .setback-lead{font-size:13px;font-weight:800;color:#050505}.setback-context{display:grid;flex:0 0 auto;grid-template-columns:repeat(5,minmax(0,1fr));gap:2mm}.setback-context>div{min-width:0;padding:2.3mm 2.6mm;border:.3mm solid var(--line);border-radius:2mm;background:#fff;break-inside:avoid;page-break-inside:avoid}.setback-context span{display:block;margin-bottom:1mm;color:var(--muted);font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.25px}.setback-context strong{display:block;font-size:11px;line-height:1.2;overflow-wrap:anywhere}.setback-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-flow:row;grid-auto-rows:minmax(0,1fr);align-content:stretch;gap:2mm;min-height:0;flex:1;overflow:hidden}.setback-card{min-width:0;min-height:0;padding:2.7mm 3.2mm;border:.3mm solid var(--line);border-radius:2mm;background:#fff;overflow:hidden;break-inside:avoid;page-break-inside:avoid}.setback-card h2{margin:0 0 1mm;color:#353b43;font-size:9.5px;font-weight:800;overflow-wrap:anywhere}.setback-card .setback-value{font-size:14.5px;line-height:1.08;font-weight:800;overflow-wrap:anywhere}.setback-card p{margin:1.2mm 0 0;font-size:9px;line-height:1.3;color:#4f555d;overflow-wrap:anywhere;hyphens:auto}.setback-dense .setback-card{padding:2.3mm 2.8mm}.setback-dense .setback-card p{font-size:8.5px;line-height:1.24}.setback-support-page{justify-content:flex-start}.setback-notes{min-height:0;padding:3mm;border-radius:2mm;background:#f3f4f5;overflow:hidden;break-inside:avoid;page-break-inside:avoid}.setback-notes h2,.setback-sources h2{margin:0 0 2mm;font-size:11px}.setback-check-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2mm}.setback-check-grid p{min-width:0;margin:0;padding:2.5mm;border:.3mm solid #d1d4d8;border-radius:2mm;background:#fff;font-size:9.5px;line-height:1.35;color:#454a51;overflow-wrap:anywhere;hyphens:auto;break-inside:avoid;page-break-inside:avoid}.setback-sources{flex:0 0 auto;padding:3mm;border:.3mm solid var(--line);border-radius:2mm;font-size:9px;line-height:1.35;color:#454a51;overflow:hidden;break-inside:avoid;page-break-inside:avoid}.setback-source-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1.5mm 4mm}.setback-source-list a,.setback-source-list span{min-width:0;padding:2mm;border-radius:1.5mm;background:#f1f4f8;font-weight:700;color:#124fae;overflow-wrap:anywhere;text-decoration:none}",
           ".flood-copy,.disclaimer-copy{max-width:225mm;margin-top:8mm;font-size:15px;line-height:1.5}.flood-copy p,.disclaimer-copy p{margin:0 0 5mm}.flood-link{display:inline-flex;padding:2.5mm 4mm;border-radius:5mm;background:#000;color:#fff;text-decoration:none;font-size:11px;font-weight:700}.disclaimer-lead{font-size:18px;font-weight:700}.disclaimer-list{margin:5mm 0 0;padding-left:7mm}.disclaimer-list li{margin:3mm 0}.disclaimer-foot{margin-top:7mm;padding-top:4mm;border-top:.3mm solid var(--line);font-size:10px;color:var(--muted)}",
+          ".report-export-bar{position:fixed;z-index:10000;right:16px;bottom:16px}.report-export-button{min-width:170px;min-height:52px;padding:13px 20px;border:2px solid #fff;border-radius:12px;background:#2054d4;color:#fff;box-shadow:0 10px 32px rgba(0,0,0,.3),0 0 0 3px rgba(32,84,212,.28);font:800 14px/1.15 'Hanken Grotesk',Arial,sans-serif;letter-spacing:.1px;cursor:pointer;transition:transform .15s ease,background .15s ease,box-shadow .15s ease}.report-export-button:hover{transform:translateY(-2px);background:#1746bd;box-shadow:0 14px 36px rgba(0,0,0,.34),0 0 0 4px rgba(32,84,212,.32)}.report-export-button:focus-visible{outline:none;box-shadow:0 10px 32px rgba(0,0,0,.3),0 0 0 5px rgba(32,84,212,.4)}.pdf-map-hint{display:none}",
           "@media screen and (max-width:1150px){body{padding:0}.report-page{width:100vw;height:70.707vw;margin:0 auto 12px}}",
-          "@media print{html,body{background:#fff}body{padding:0}.report-page{margin:0;box-shadow:none}.legend-panel,.detail-panel{overflow:hidden;scrollbar-gutter:auto}.legend-heading{position:static}.legend-heading span{display:none}.dense-legend{padding:2mm}.dense-legend .legend-heading{margin:-2mm -2mm 1mm;padding:1.5mm 2mm}.dense-legend .leg{font-size:6.2px;line-height:1.08}.dense-legend .row{gap:1mm;margin:.35mm 0}.dense-legend .swbox{width:4mm;height:3.5mm}.detail-panel{font-size:7px;padding:2mm}.detail-panel th,.detail-panel td{padding:1mm}.setback-page .detail-panel{padding:0}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}",
+          "@media screen and (max-width:720px){.report-export-bar{right:8px;bottom:8px}}",
+          "@media print{html,body{background:#fff}body{padding:0}.report-page{margin:0;box-shadow:none}.report-export-bar,.interactive-map-frame,.interactive-map-loading,.interactive-map-toolbar,.panzoom-controls,.panzoom-hint{display:none!important}.pdf-map-hint{position:absolute;z-index:4;left:2.5mm;top:2.5mm;display:block;padding:1.2mm 1.7mm;border-radius:2mm;background:rgba(255,255,255,.92);font-size:7px;font-weight:700}.property-map-static{display:block!important;opacity:1!important;transition:none!important}.property-map>.map-scale{opacity:1!important;transition:none!important}.report-panzoom-image{transform:none!important}.legend-panel,.detail-panel{overflow:hidden;scrollbar-gutter:auto}.legend-heading{position:static}.legend-heading span{display:none}.dense-legend{padding:2mm}.dense-legend .legend-heading{margin:-2mm -2mm 1mm;padding:1.5mm 2mm}.dense-legend .leg{font-size:6.2px;line-height:1.08}.dense-legend .row{gap:1mm;margin:.35mm 0}.dense-legend .swbox{width:4mm;height:3.5mm}.detail-panel{font-size:7px;padding:2mm}.detail-panel th,.detail-panel td{padding:1mm}.setback-page .detail-panel{padding:0}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}",
           "</style></head><body>"
+        );
+        out.push(
+          "<div class='report-export-bar' role='region' aria-label='Report export options'>",
+            "<button class='report-export-button' id='printStaticReport' type='button'>Print / Save PDF</button>",
+          "</div>"
         );
         out.push(
           "<section class='report-page cover-page'>",
             "<div class='cover-head'><img src='",logoWhite,"' alt='Lot Companion'><span>",esc(when),"</span></div>",
-            "<div class='cover-title'><h1>",coverAddress,"</h1><div class='cover-rule'></div><p class='cover-tagline'>Know your lot before you build.</p></div>",
+                "<div class='cover-title'><h1>",coverAddress,"</h1><div class='cover-rule'></div><p class='cover-tagline'>Know your lot before you build.</p></div>",
             "<div class='cover-credits'>",
               "<span class='cover-credit-icon brand'><img src='",brandIcon,"' alt=''></span><span>Prepared by<strong>Lot Companion</strong></span>",
             "</div>",
@@ -2716,9 +2675,11 @@
               "<div class='property-meta'><div class='badges'>",
                 "<span class='badge-pill'><strong>Lot/Plan:&nbsp;</strong>",esc(lot),"</span>",
                 "<span class='badge-pill'><strong>Area:&nbsp;</strong>",esc(reportArea),"</span>",
-                "<span class='badge-pill'><strong>Class:&nbsp;</strong>",esc(propertyClass),"</span>",
+                  "<span class='badge-pill'><strong>Class:&nbsp;</strong>",esc(propertyClass),"</span>",
               "</div><div class='property-kv'><span><strong>Address:</strong>&nbsp; ",esc(displayAddress),"</span><span><strong>Council:</strong>&nbsp; ",esc(council),"</span></div></div>",
-              "<div class='property-map'><img src='",baseShot.dataUrl,"' alt='Aerial map of ",esc(safeAddress),"'>",scaleHTML(baseShot),"</div>",
+              "<div class='property-map' id='interactivePropertyMapShell'><img class='property-map-static' src='",baseShot.dataUrl,"' alt='Aerial map of ",esc(safeAddress),"'>",scaleHTML(baseShot),
+                includeInteractiveMapFrame?"<iframe class='interactive-map-frame' id='interactivePropertyMapFrame' title='Interactive map of "+esc(safeAddress)+"' src='"+esc(currentInteractiveMapUrl)+"'></iframe><div class='interactive-map-loading' id='interactivePropertyMapStatus'>Loading interactive map...</div><div class='interactive-map-toolbar'><span>Scroll, pinch or use +/- to zoom</span><a target='_blank' rel='noopener' href='"+esc(currentInteractiveMapUrl)+"'>Open full map</a></div>":"",
+              "</div>",
             "</main>",pageFooter(),
           "</section>"
         );
@@ -2779,7 +2740,7 @@
             "</section>"
           );
         }
-        reportShots.forEach(shot=>{
+        const appendOverlayShot=shot=>{
           const schemeLink=shot.schemeLink||makePlanningLink(shot.title);
           const denseLegend=/utilit/i.test(shot.title||"")||String(shot.legendHTML||"").length>1800;
           out.push(
@@ -2787,11 +2748,21 @@
               "<main class='page-content'><h1 class='page-title'>",esc(shot.title),"</h1><div class='overlay-actions'>",
                 schemeLink?`<a class='action-link' target='_blank' rel='noopener' href='${esc(schemeLink)}'>Open planning scheme</a>`:"",
                 "<a class='action-link' href='#summary'>Back to Summary</a></div>",
-                "<div class='overlay-layout'><div class='overlay-map'><img src='",shot.dataUrl,"' alt='",esc(shot.title)," map'>",scaleHTML(shot),"</div>",
+                "<div class='overlay-layout'><div class='overlay-map report-panzoom' tabindex='0' role='region' aria-label='Zoomable ",esc(shot.title)," map'><img class='report-panzoom-image' draggable='false' src='",shot.dataUrl,"' alt='",esc(shot.title)," map'>",scaleHTML(shot),"<div class='panzoom-hint'>Drag to move &middot; Scroll or pinch to zoom</div><div class='pdf-map-hint'>Use the PDF viewer's zoom and hand tool to inspect this map</div><div class='panzoom-controls' aria-label='Map image zoom controls'><button type='button' data-panzoom-action='out' aria-label='Zoom out'>&minus;</button><span class='panzoom-level' aria-live='polite'>100%</span><button type='button' data-panzoom-action='in' aria-label='Zoom in'>+</button><button type='button' class='panzoom-reset' data-panzoom-action='reset'>Reset</button></div></div>",
                 "<aside class='legend-panel",denseLegend?" dense-legend":"","'><div class='legend-heading'><strong>Key</strong>",denseLegend?"<span>Scroll for all items</span>":"","</div>",shot.note?"<div class='note'>"+esc(shot.note)+"</div>":"",shot.legendHTML||(shot.note?"":"<span>No mapped features.</span>"),"</aside></div>",
               "</main>",pageFooter(),
             "</section>"
           );
+        };
+        mappingSections.forEach(section=>{
+          out.push(
+            "<section class='report-page mapping-section-page' id='",section.id,"'>",
+              "<div class='mapping-section-head'><img src='",logoWhite,"' alt='Lot Companion'><span>",esc(safeAddress),"</span></div>",
+              "<div class='mapping-section-title'><h1>",section.title,"</h1><div class='cover-rule'></div><p>",section.description,"</p></div>",
+              "<div></div>",pageFooter(),
+            "</section>"
+          );
+          section.shots.forEach(appendOverlayShot);
         });
         out.push(
           "<section class='report-page disclaimer-page'>",pageHeader(),
@@ -2800,8 +2771,215 @@
               "<ul class='disclaimer-list'><li>No legal, planning, building or certification advice is provided.</li><li>Mapping layers may be sourced from third parties and can change without notice.</li><li>Lot Companion does not guarantee the accuracy, completeness or currency of any data shown.</li><li>Obtain independent professional advice and confirm information with the relevant authority before acting.</li><li>To the maximum extent permitted by law, Lot Companion disclaims liability for loss or damage arising from use of this report.</li></ul>",
               "<div class='disclaimer-foot'><strong>Terms of Use &amp; Privacy Policy:</strong> Refer to the Lot Companion Terms &amp; Privacy page for full details.</div>",
             "</div></main>",pageFooter(),
-          "</section></body></html>"
+          "</section>"
         );
+        out.push(`<script>
+          (()=>{
+            const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
+            document.querySelectorAll(".report-panzoom").forEach(container=>{
+              const image=container.querySelector(".report-panzoom-image");
+              const level=container.querySelector(".panzoom-level");
+              if(!image) return;
+              const state={scale:1,x:0,y:0};
+              const pointers=new Map();
+              let dragStart=null;
+              let pinchStart=null;
+              const constrain=()=>{
+                const minX=container.clientWidth*(1-state.scale);
+                const minY=container.clientHeight*(1-state.scale);
+                state.x=clamp(state.x,minX,0);
+                state.y=clamp(state.y,minY,0);
+              };
+              const render=()=>{
+                constrain();
+                image.style.transform="translate3d("+state.x+"px,"+state.y+"px,0) scale("+state.scale+")";
+                if(level) level.textContent=Math.round(state.scale*100)+"%";
+                container.dataset.zoom=String(state.scale);
+              };
+              const zoomAt=(nextScale,clientX,clientY)=>{
+                const rect=container.getBoundingClientRect();
+                const next=clamp(nextScale,1,8);
+                const localX=(Number.isFinite(clientX)?clientX:rect.left+rect.width/2)-rect.left;
+                const localY=(Number.isFinite(clientY)?clientY:rect.top+rect.height/2)-rect.top;
+                const ratio=next/state.scale;
+                state.x=localX-(localX-state.x)*ratio;
+                state.y=localY-(localY-state.y)*ratio;
+                state.scale=next;
+                render();
+              };
+              const reset=()=>{
+                state.scale=1;
+                state.x=0;
+                state.y=0;
+                render();
+              };
+              const beginPinch=()=>{
+                if(pointers.size<2){ pinchStart=null; return; }
+                const pair=[...pointers.values()].slice(0,2);
+                const rect=container.getBoundingClientRect();
+                pinchStart={
+                  distance:Math.max(1,Math.hypot(pair[1].x-pair[0].x,pair[1].y-pair[0].y)),
+                  centerX:(pair[0].x+pair[1].x)/2-rect.left,
+                  centerY:(pair[0].y+pair[1].y)/2-rect.top,
+                  scale:state.scale,
+                  x:state.x,
+                  y:state.y
+                };
+              };
+              container.addEventListener("wheel",event=>{
+                event.preventDefault();
+                zoomAt(state.scale*Math.exp(-event.deltaY*.0015),event.clientX,event.clientY);
+              },{passive:false});
+              container.addEventListener("pointerdown",event=>{
+                if(event.button!==0 || event.target.closest("button,a")) return;
+                event.preventDefault();
+                container.focus({preventScroll:true});
+                try{ container.setPointerCapture(event.pointerId); }catch{}
+                pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+                container.classList.add("is-dragging");
+                if(pointers.size===1){
+                  dragStart={clientX:event.clientX,clientY:event.clientY,x:state.x,y:state.y};
+                }else{
+                  beginPinch();
+                }
+              });
+              container.addEventListener("pointermove",event=>{
+                if(!pointers.has(event.pointerId)) return;
+                event.preventDefault();
+                pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});
+                if(pointers.size>=2 && pinchStart){
+                  const pair=[...pointers.values()].slice(0,2);
+                  const rect=container.getBoundingClientRect();
+                  const distance=Math.max(1,Math.hypot(pair[1].x-pair[0].x,pair[1].y-pair[0].y));
+                  const centerX=(pair[0].x+pair[1].x)/2-rect.left;
+                  const centerY=(pair[0].y+pair[1].y)/2-rect.top;
+                  const next=clamp(pinchStart.scale*(distance/pinchStart.distance),1,8);
+                  const ratio=next/pinchStart.scale;
+                  state.scale=next;
+                  state.x=centerX-(pinchStart.centerX-pinchStart.x)*ratio;
+                  state.y=centerY-(pinchStart.centerY-pinchStart.y)*ratio;
+                  render();
+                }else if(dragStart){
+                  state.x=dragStart.x+event.clientX-dragStart.clientX;
+                  state.y=dragStart.y+event.clientY-dragStart.clientY;
+                  render();
+                }
+              });
+              const endPointer=event=>{
+                pointers.delete(event.pointerId);
+                if(pointers.size>=2){
+                  beginPinch();
+                }else if(pointers.size===1){
+                  pinchStart=null;
+                  const remaining=[...pointers.values()][0];
+                  dragStart={clientX:remaining.x,clientY:remaining.y,x:state.x,y:state.y};
+                }else{
+                  dragStart=null;
+                  pinchStart=null;
+                  container.classList.remove("is-dragging");
+                }
+              };
+              container.addEventListener("pointerup",endPointer);
+              container.addEventListener("pointercancel",endPointer);
+              container.addEventListener("dblclick",event=>{
+                if(event.target.closest("button,a")) return;
+                event.preventDefault();
+                zoomAt(state.scale*1.6,event.clientX,event.clientY);
+              });
+              container.querySelectorAll("[data-panzoom-action]").forEach(button=>{
+                button.addEventListener("click",event=>{
+                  event.stopPropagation();
+                  const action=button.dataset.panzoomAction;
+                  if(action==="reset") reset();
+                  else zoomAt(state.scale*(action==="in"?1.4:1/1.4));
+                });
+              });
+              container.addEventListener("keydown",event=>{
+                const step=32;
+                if(event.key==="+" || event.key==="="){ event.preventDefault(); zoomAt(state.scale*1.4); }
+                else if(event.key==="-"){ event.preventDefault(); zoomAt(state.scale/1.4); }
+                else if(event.key==="0"){ event.preventDefault(); reset(); }
+                else if(event.key==="ArrowLeft"){ event.preventDefault(); state.x+=step; render(); }
+                else if(event.key==="ArrowRight"){ event.preventDefault(); state.x-=step; render(); }
+                else if(event.key==="ArrowUp"){ event.preventDefault(); state.y+=step; render(); }
+                else if(event.key==="ArrowDown"){ event.preventDefault(); state.y-=step; render(); }
+              });
+              window.addEventListener("resize",render,{passive:true});
+              render();
+            });
+            const printButton=document.getElementById("printStaticReport");
+            if(printButton) printButton.addEventListener("click",()=>window.print());
+          })();
+        <\/script>`);
+        if(includeInteractiveMapFrame){
+          out.push(`<script>
+            (()=>{
+              const shell=document.getElementById("interactivePropertyMapShell");
+              const frame=document.getElementById("interactivePropertyMapFrame");
+              const status=document.getElementById("interactivePropertyMapStatus");
+              if(!shell || !frame) return;
+              if(window.location.protocol==="file:"){
+                frame.remove();
+                status?.remove();
+                return;
+              }
+              let finished=false;
+              let attempts=0;
+              const stopWithFallback=()=>{
+                if(finished) return;
+                finished=true;
+                if(status) status.textContent="Interactive preview unavailable - use Open interactive map";
+              };
+              const isolateMap=()=>{
+                if(finished) return;
+                attempts+=1;
+                try{
+                  const childWindow=frame.contentWindow;
+                  const childDocument=frame.contentDocument;
+                  const viewDiv=childDocument?.getElementById("viewDiv");
+                  const accessGate=childDocument?.getElementById("accessGate");
+                  const accessBlocked=accessGate && accessGate.classList.contains("active") && accessGate.getAttribute("aria-hidden")!=="true";
+                  const viewReady=viewDiv?.querySelector(".esri-view-root");
+                  if(!childWindow || !childDocument || !viewDiv || !viewReady || accessBlocked){
+                    if(attempts<600) childWindow?.setTimeout(isolateMap,200);
+                    else stopWithFallback();
+                    return;
+                  }
+                  let current=viewDiv;
+                  while(current && current!==childDocument.body){
+                    const parent=current.parentElement;
+                    if(!parent) break;
+                    for(const sibling of parent.children){
+                      if(sibling!==current) sibling.style.setProperty("display","none","important");
+                    }
+                    current.style.setProperty("position","fixed","important");
+                    current.style.setProperty("inset","0","important");
+                    current.style.setProperty("width","100%","important");
+                    current.style.setProperty("height","100%","important");
+                    current.style.setProperty("min-width","0","important");
+                    current.style.setProperty("min-height","0","important");
+                    current.style.setProperty("margin","0","important");
+                    current.style.setProperty("padding","0","important");
+                    current.style.setProperty("overflow","hidden","important");
+                    current=parent;
+                  }
+                  childDocument.documentElement.style.cssText="width:100%;height:100%;margin:0;overflow:hidden";
+                  childDocument.body.style.cssText="width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#e8eaed";
+                  finished=true;
+                  shell.classList.add("interactive-ready");
+                  childWindow.dispatchEvent(new Event("resize"));
+                  childWindow.setTimeout(()=>childWindow.dispatchEvent(new Event("resize")),250);
+                }catch{
+                  if(attempts<600) setTimeout(isolateMap,200);
+                  else stopWithFallback();
+                }
+              };
+              frame.addEventListener("load",isolateMap,{once:true});
+              setTimeout(isolateMap,100);
+            })();
+          <\/script>`);
+        }
+        out.push("</body></html>");
         return out.join("");
       }
 
@@ -2827,6 +3005,8 @@
   const symbolUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js");
   const locator = await import("https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js");
   const { default: esriConfig } = await import("https://js.arcgis.com/4.30/@arcgis/core/config.js");
+      scheduleQueenslandStateBushfireLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
+
       /* ---------------- Tunables ---------------- */
       const TOUCH_BUFFER_M = 6;
       const SWATCH_PX = 16;
@@ -2847,7 +3027,7 @@
       const HOUSES_OUT = 3;
       const HOUSE_LOT_METERS = 25;
       const SCREEN_BUFFER_METERS = HOUSES_OUT * HOUSE_LOT_METERS;
-      const SHOT_SIZE = { width: 1280, height: 900 };
+      const SHOT_SIZE = { width: 1920, height: 1350 };
 
       /* ---- CORS allow-list for address queries ---- */
       const CORS_HOSTS = [
@@ -2983,7 +3163,7 @@
       };
 
       /* ---------------- Map & rules ---------------- */
-      const portal=new Portal({url:"https://www.arcgis.com"});
+      const portal=new Portal({url:"https://www.arcgis.com",authMode:"anonymous"});
       // *** IMPORTANT: swapped to Ipswich webmap item ***
       let webmap=new WebMap({portalItem:{id:"36510c6555ab4c33a170e7efc2cc7b7e",portal:portal}});
       const selLayer=new GraphicsLayer({listMode:"hide"}); webmap.add(selLayer);
@@ -3094,6 +3274,7 @@
       const layerList=new LayerList({view:view,listItemCreatedFunction:function(e){
         const item=e.item, node=item.sublayer||item.layer;
         if(!node) return;
+        if(isQueenslandStateBushfireLayer(node)){ try{node.listMode="show";}catch(e){} item.panel={content:"legend",open:false}; return; }
         if(node.type==="graphics"){ item.visible=false; item.panel=null; try{node.listMode="hide";}catch(e){} return; }
         let cur=node, inDNT=false;
         while(cur){
@@ -3606,6 +3787,7 @@
           }catch(e){}
         }
         if(!feats.length) return {items:[]};
+        if(isZone) feats=selectDominantPolygonLegendFeatures(feats,lotGeom,geometryEngine,feature=>pickZoneLabel(feature.attributes,layerNode));
 
         const itemMap=new Map();
         for(var i=0;i<feats.length;i++){
@@ -3731,22 +3913,22 @@
         return out;
       }
 
-      function collectAllBushfireDisplayNodes(){
+      function collectLocalBushfireDisplayNodes(){
+        ensureQueenslandStateBushfireLayer(view?.map||webmap,FeatureLayer);
         return collectLeafDisplayNodesByPredicate(function(n,t,p,id,tg){
+          if(isQueenslandStateBushfireLayer(n)) return false;
           const hay=strHay(n);
           return HARDWIRED.bushfire.some(function(rx){return rx.test(hay);}) || isBushfire(t,p);
         },{includeDNT:true});
       }
-      function collectAllFFDIDisplayNodes(){
-        const map=(typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null);
-        return [ensureQueenslandFfdiLayer(map,FeatureLayer,esriConfig)].filter(Boolean);
+      function collectStateBushfireDisplayNodes(){
+        return [ensureQueenslandStateBushfireLayer(view?.map||webmap,FeatureLayer)].filter(Boolean);
       }
-      [300,1200,3500].forEach(delay=>setTimeout(()=>{ try{ collectAllFFDIDisplayNodes(); }catch{} },delay));
-      function collectAllNoiseDisplayNodes(){
-        return collectLeafDisplayNodesByPredicate(function(n,t,p,id,tg){
-          const hay=strHay(n);
-          return HARDWIRED.noise.some(function(rx){return rx.test(hay);}) || isNoise(t,p);
-        },{includeDNT:true});
+      function collectLocalNoiseDisplayNodes(){
+        return collectLocalTransportNoiseCorridorDisplayNodes(view?.map||webmap);
+      }
+      function collectStateNoiseDisplayNodes(){
+        return collectStateTransportNoiseCorridorDisplayNodes(view?.map||webmap);
       }
 
       const ancestors=function(node){ const out=[]; var p=node?node.parent:null; while(p){ out.push(p); p=p.parent; } return out; };
@@ -3882,7 +4064,7 @@
             }
 
             const count=await sumCounts(nodes,lotGeom);
-            return {title:title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,scaleText:shot.scaleText,legendHTML:legendParts.join(""),count:count};
+            return {title:title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,scaleText:shot.scaleText,legendHTML:legendParts.join(""),count:count,overlayLayers:targets.map(n=>String(n?.title||"").trim()).filter(Boolean)};
           });
         } finally {
           for(const [n,op] of opSnap){ try{n.opacity=op;}catch(e){} }
@@ -3901,9 +4083,10 @@
 
       async function addMandatorySection(shots, title, collectorFn, geom, baseShot, emptyNote){
         try{
-          const {nodes,captureOptions} = await prepareMandatoryOverlayReportSection(view.map,title,collectorFn);
+          const {nodes,captureOptions} = await prepareMandatoryOverlayReportSection(view.map,title,collectorFn,{geometry:geom});
           if(nodes.length){
-            const s = await screenshotFor(nodes, title, geom, false, captureOptions);
+            const restoreTncFilter=applyTransportNoiseCorridorFeatureFilter(nodes,captureOptions?.tncObjectIdsByNode);
+            const s = await screenshotFor(nodes, title, geom, false, captureOptions).finally(restoreTncFilter);
             if(!s){ shots.push({title:title,id:"rpt-"+slug(title),dataUrl:baseShot.dataUrl,scaleText:baseShot.scaleText,legendHTML:"",count:0,note:emptyNote}); }
             else { if((s.count||0)===0) s.note=emptyNote; shots.push(s); }
           }else{
@@ -3957,6 +4140,8 @@
       // headless browser session started by the report API.
       window.__LOT_WISE_REPORT_AUTOMATION__ = Object.freeze({
         focusOnLotPlan: (lot, plan) => focusOnLotPlan(lot, plan),
+        getView: () => view,
+        getSelectionLayer: () => selLayer,
         buildReport: () => buildAndOpenReport()
       });
 
@@ -4029,13 +4214,14 @@
           var shots=[];
           var tasks=[
             ["Zoning", async function(){ if(cats.zoning.length){ var s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); } }],
-            ["Bushfire", async function(){ await addMandatorySection(shots,"Bushfire",collectAllBushfireDisplayNodes,geom,overlayBaseShot,"No bushfire Level"); }],
-            ["FFDI", async function(){ await addMandatorySection(shots,"FFDI",collectAllFFDIDisplayNodes,geom,overlayBaseShot,"No FFDI layer"); }],
-            ["Utilities", async function(){ var all=collectLeafDisplayNodesByPredicate(function(n,t,p,id,tg){ return isUtility(t,id,tg)||isWaterOrSewer(p); },{includeDNT:true}); if(all.length){ var s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true,legendUseExtent:true,legendAllRendererItems:true}); if(s) shots.push(s); } }],
+            ["Local bushfire", async function(){ await addMandatorySection(shots,"Bushfire - Local Planning Scheme",collectLocalBushfireDisplayNodes,geom,overlayBaseShot,"No local bushfire level"); }],
+            ["State bushfire", async function(){ await addMandatorySection(shots,"Bushfire - Queensland State Mapping",collectStateBushfireDisplayNodes,geom,overlayBaseShot,"No state bushfire level"); }],
+            ["Utilities", async function(){ await addMandatorySection(shots,"Utilities",function(){ return collectLeafDisplayNodesByPredicate(function(n,t,p,id,tg){ return isUtility(t,id,tg)||isWaterOrSewer(p); },{includeDNT:true}); },geom,overlayBaseShot,"No utility overlay triggered for this property."); }],
             ["Acid overlays", async function(){ if(cats.acid.length){ var s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); } }],
             ["Transport", async function(){ if(cats.transport.length){ var s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); } }],
             ["Air quality", async function(){ if(cats.air.length){ var s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); } }],
-            ["Transport Noise Corridor", async function(){ await addMandatorySection(shots,"Transport Noise Corridor",collectAllNoiseDisplayNodes,geom,overlayBaseShot,"No Transport Noise Level"); }],
+            ["Local TNC", async function(){ await addMandatorySection(shots,"Transport Noise Corridor - Local Mapping",collectLocalNoiseDisplayNodes,geom,overlayBaseShot,"No local Transport Noise Corridor level"); }],
+            ["State TNC", async function(){ await addMandatorySection(shots,"Transport Noise Corridor - Queensland State Mapping",collectStateNoiseDisplayNodes,geom,overlayBaseShot,"No state Transport Noise Corridor level"); }],
             ["Other overlays", async function(){ for (var i2=0;i2<cats.others.length;i2++) { var n2=cats.others[i2]; var s=await screenshotFor([n2], n2.title || "Overlay", geom); if (s) shots.push(s); } }]
           ];
           for(var ti=0;ti<tasks.length;ti++){
@@ -4043,7 +4229,8 @@
             setRpt("Rendering " + name + "...", 55 + Math.round(((ti+1)/tasks.length)*30));
             await fn();
           }
-          dedupeShotsByTitle(shots,"Transport Noise Corridor");
+          dedupeShotsByTitle(shots,"Transport Noise Corridor - Local Mapping");
+          dedupeShotsByTitle(shots,"Transport Noise Corridor - Queensland State Mapping");
           setRpt("Overlays rendered", 87, "rptS3");
           let qscfData=null;
           if(geom){
@@ -4448,6 +4635,7 @@
         } finally { showLoading(false); }
       }
       view.on("click", async function(ev){
+        if(await showUtilityInfoPopup(view,ev,{enabled:utilitiesToggleState,utilityNodes:getUtilityNodes})) return;
         await selectParcelAtPoint(ev.mapPoint);
       });
 

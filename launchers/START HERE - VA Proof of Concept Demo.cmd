@@ -1,0 +1,2 @@
+@echo off
+call "%~dp0START HERE - LOT COMPANION INTEGRATION DEMO.cmd"

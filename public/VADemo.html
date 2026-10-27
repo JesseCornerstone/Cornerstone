@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lot Companion Integration Demonstration</title>
+  <link rel="icon" href="/images/lot-companion-icon.png">
+  <link rel="stylesheet" href="/va-integration.css">
+</head>
+<body>
+  <main class="page-shell">
+    <header class="brand-header">
+      <img src="/images/lot-companion-logo-white.png" alt="Lot Companion">
+      <div>
+        <p class="eyebrow">Visual Approvals integration</p>
+        <h1>Property report demonstration</h1>
+      </div>
+    </header>
+
+    <section class="panel intro">
+      <h2>Create a property report</h2>
+      <p>Submit application details to the same report service used by Cornerstone Application Intake.</p>
+    </section>
+
+    <form id="report-form" class="panel form-grid">
+      <label>
+        Job number
+        <input id="job-number" name="jobNumber" value="DEMO-001" required>
+      </label>
+      <label>
+        Application type
+        <input id="application-type" name="applicationType" value="Class 1a - detached house">
+      </label>
+      <label class="full-width">
+        Property address
+        <input id="address" name="address" value="1 Romach Street, Morayfield QLD 4506" required>
+      </label>
+      <label>
+        Lot
+        <input id="lot" name="lot" value="636">
+      </label>
+      <label>
+        Plan
+        <input id="plan" name="plan" value="SP350483">
+      </label>
+      <label class="full-width">
+        Council
+        <input id="council" name="council" value="City of Moreton Bay">
+      </label>
+
+      <details class="connection full-width">
+        <summary>Connection settings</summary>
+        <div class="form-grid compact">
+          <label>
+            Report service URL
+            <input id="api-base" name="apiBase" inputmode="url">
+          </label>
+          <label>
+            API key
+            <input id="api-key" name="apiKey" type="password" autocomplete="off">
+          </label>
+        </div>
+      </details>
+
+      <div class="actions full-width">
+        <button id="submit-button" type="submit" class="primary">Generate report</button>
+        <button id="download-button" type="button" disabled>Download PDF</button>
+        <a id="admin-link" class="button-link" href="/VAAdmin.html">View report list</a>
+      </div>
+    </form>
+
+    <section class="panel status-panel" aria-live="polite">
+      <div>
+        <p class="eyebrow">Report status</p>
+        <h2 id="status-heading">Ready</h2>
+      </div>
+      <p id="status-message">Enter the property details, then select Generate report.</p>
+      <dl id="report-details" class="report-details" hidden></dl>
+    </section>
+  </main>
+  <script src="/va-demo.js" defer></script>
+</body>
+</html>

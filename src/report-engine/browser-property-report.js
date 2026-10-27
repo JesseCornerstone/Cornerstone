@@ -31,7 +31,7 @@ async function renderBrowserPropertyReport(job, council, onProgress) {
         '--disable-gpu',
         '--no-default-browser-check',
         '--no-first-run',
-        '--window-size=1600,1000'
+        '--window-size=2100,1350'
       ]
     });
 
@@ -40,8 +40,8 @@ async function renderBrowserPropertyReport(job, council, onProgress) {
       page.setDefaultNavigationTimeout(Math.min(timeoutMs, 90000));
       page.setDefaultTimeout(timeoutMs);
       await page.setViewport({
-        width: 1600,
-        height: 1000,
+        width: 2100,
+        height: 1350,
         deviceScaleFactor: 1
       });
       await page.evaluateOnNewDocument(() => {

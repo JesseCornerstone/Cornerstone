@@ -5,16 +5,11 @@
   if (!modulePath) return;
   if (window.location.protocol === 'file:') return;
 
-  var version = '20260916-bal-calculator';
+  var version = '20261008-tnc-key-split';
   var moduleUrl = new URL(modulePath, document.baseURI);
   if (!moduleUrl.searchParams.has('v')) moduleUrl.searchParams.set('v', version);
 
-  var balModuleUrl = new URL('./bal-calculator.js', currentScript.src || document.baseURI);
-  balModuleUrl.searchParams.set('v', version);
-
-  import(balModuleUrl.href).then(function () {
-    return import(moduleUrl.href);
-  }).catch(function (err) {
+  import(moduleUrl.href).catch(function (err) {
     console.error('Council module failed to load', err);
 
     if (document.getElementById('lot-wise-module-load-error')) return;

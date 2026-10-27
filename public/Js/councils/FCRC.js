@@ -4,6 +4,7 @@ import {
   addCorsHosts,
   attrEsc,
   applyReportMapScale,
+  applyTransportNoiseCorridorFeatureFilter,
   backgroundFactor,
   composeLandscapePropertyReport,
   queryQueenslandCadastralData,
@@ -12,7 +13,9 @@ import {
   getReportMapScale,
   getQueryParam,
   htmlEsc,
-  ensureQueenslandFfdiLayer,
+  ensureQueenslandStateBushfireLayer,
+  isQueenslandStateBushfireLayer,
+  scheduleQueenslandStateBushfireLayer,
   organizePlanningSchemeLayers,
   initPodUpload,
   isNativeParcelReferenceLayer,
@@ -29,14 +32,18 @@ import {
   setTimerVisible,
   showLoading,
   showPropertyInfoPopup,
+  showUtilityInfoPopup,
+  collectLocalTransportNoiseCorridorDisplayNodes,
+  collectStateTransportNoiseCorridorDisplayNodes,
   prepareMandatoryOverlayReportSection,
   queryStrictOverlayFeatureHits,
+  selectDominantPolygonLegendFeatures,
   sleep,
   slug,
   prepareNativeParcelReferences,
   wireSearchResultSelection,
   withSatelliteBasemap
-} from "../council-hub.js?v=20260911-council-parity";
+} from "../council-hub.js?v=20261009-high-resolution-pdf";
     /* ---------------- ArcGIS imports ---------------- */
     import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
     import WebMap from "https://js.arcgis.com/4.30/@arcgis/core/WebMap.js";
@@ -58,6 +65,7 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
     import * as symbolUtils from "https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js";
     import * as locator from "https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js";
     import esriConfig from "https://js.arcgis.com/4.30/@arcgis/core/config.js";
+    scheduleQueenslandStateBushfireLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
 
     /* ---------------- Tunables ---------------- */
     const TOUCH_BUFFER_M = 6;
@@ -82,7 +90,7 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
     const HOUSES_OUT = 3;
     const HOUSE_LOT_METERS = 25;
     const SCREEN_BUFFER_METERS = HOUSES_OUT * HOUSE_LOT_METERS;
-    const SHOT_SIZE = { width: 1280, height: 900 };
+    const SHOT_SIZE = { width: 1920, height: 1350 };
 
     /* ---- CORS allow-list for address queries ---- */
     const CORS_HOSTS = [
@@ -212,7 +220,7 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
     };
 
     /* ---------------- Map & rules ---------------- */
-    const portal=new Portal({url:"https://www.arcgis.com"});
+    const portal=new Portal({url:"https://www.arcgis.com",authMode:"anonymous"});
     // Cornerstone's public Fraser Coast planning/overlay web map.
     const FCRC_WEBMAP_ID="481d05e2c29044c09d70352961f769ed";
     let webmap=new WebMap({portalItem:{id:FCRC_WEBMAP_ID,portal}});
@@ -248,7 +256,7 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
     const selLayer=new GraphicsLayer({listMode:"hide"});
     webmap.addMany([fcrcPropertyBoundaryLayer,fcrcNaturalBoundaryLayer,fcrcParcelAddressLayer,selLayer]);
 
-    const SPP_BUSHFIRE_LAYER_URL="https://arcgis.spp-dams.wspdigitaltesting.com/arcgis/rest/services/SPP/SPP_Data/MapServer/77";
+    const SPP_BUSHFIRE_LAYER_URL="https://services1.arcgis.com/vkTwD8kHw2woKBqV/arcgis/rest/services/WOS_PIB/FeatureServer/0";
     const sppBushfireRenderer={
       type:"unique-value",
       field:"CLASS",
@@ -471,7 +479,6 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
       showLoading(true);
       try{
         await webmap.load();
-        ensureQueenslandFfdiLayer(webmap,FeatureLayer,esriConfig);
         ensureSppBushfireLayer();
         enforceOverlayRules();
         try{ await view.when(); }catch{}
@@ -479,7 +486,6 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
         console.warn("Fraser Coast web map failed to load; using fallback basemap",error);
         webmap=new WebMap({basemap:"streets-vector"});
         webmap.addMany([fcrcPropertyBoundaryLayer,fcrcNaturalBoundaryLayer,fcrcParcelAddressLayer,selLayer,sppBushfireLayer,sppBushfireDrawLayer]);
-        ensureQueenslandFfdiLayer(webmap,FeatureLayer,esriConfig);
         view.map=webmap;
       }finally{
         showLoading(false);
@@ -496,6 +502,7 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
       const item=event.item;
       const node=item.sublayer||item.layer;
       if(!node) return;
+      if(isQueenslandStateBushfireLayer(node)){ try{node.listMode="show";}catch{} item.panel={content:"legend",open:false}; return; }
       if(keepLegacyBushfireHidden(node)){ item.visible=false; item.panel=null; return; }
       if(node.type==="graphics"){ item.visible=false; item.panel=null; try{ node.listMode="hide"; }catch{} return; }
       let current=node;
@@ -978,6 +985,7 @@ async function updateSideOverlaySummary(geom){
       } finally { showLoading(false); }
     }
     view.on("click", async ev=>{
+      if(await showUtilityInfoPopup(view,ev,{enabled:utilitiesToggleState,utilityNodes:getUtilityNodes})) return;
       await selectParcelAtPoint(ev.mapPoint);
     });
 
@@ -1046,6 +1054,7 @@ async function updateSideOverlaySummary(geom){
         }catch{}
       }
       if(!feats.length) return {items:[]};
+      if(isZone) feats=selectDominantPolygonLegendFeatures(feats,lotGeom,geometryEngine,feature=>pickZoneLabel(feature.attributes,layerNode));
 
       const itemMap=new Map();
       for(const f of feats){
@@ -1173,7 +1182,7 @@ async function updateSideOverlaySummary(geom){
       return node===sppBushfireLayer || node===sppBushfireDrawLayer || node?.parent===sppBushfireLayer || /arcgis\.spp-dams\.wspdigitaltesting\.com\/arcgis\/rest\/services\/SPP\/SPP_Data\/MapServer(?:\/77)?\b/i.test(String(node?.url||""));
     }
     function keepLegacyBushfireHidden(node){
-      if(!node || isSppBushfireLayer(node)) return false;
+      if(!node || isSppBushfireLayer(node) || isQueenslandStateBushfireLayer(node)) return false;
       const t=node.title||"", p=nodePath(node);
       if(!isBushfire(t,p)) return false;
       if("visible" in node){ try{ node.visible=false; }catch(e){} }
@@ -1203,20 +1212,17 @@ async function updateSideOverlaySummary(geom){
         try{ if(typeof map.layers.includes==="function" && map.layers.includes(selLayer)) map.reorder(selLayer, Math.max(0, map.layers.length-1)); }catch{}
       }catch{}
     }
-    function collectAllBushfireDisplayNodes(){
-      ensureSppBushfireLayer();
-      return [getSppBushfireDisplayNode(),sppBushfireDrawLayer];
+    function collectLocalBushfireDisplayNodes(){
+      return collectLeafDisplayNodesByPredicate((n,t,p)=>!isSppBushfireLayer(n) && !isQueenslandStateBushfireLayer(n) && (HARDWIRED.bushfire.some(rx=>rx.test(strHay(n))) || isBushfire(t,p)),{includeDNT:true});
     }
-    function collectAllFFDIDisplayNodes(){
-      const map=(typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null);
-      return [ensureQueenslandFfdiLayer(map,FeatureLayer,esriConfig)].filter(Boolean);
+    function collectStateBushfireDisplayNodes(){
+      return [ensureQueenslandStateBushfireLayer(view?.map||webmap,FeatureLayer)].filter(Boolean);
     }
-    [300,1200,3500].forEach(delay=>setTimeout(()=>{ try{ collectAllFFDIDisplayNodes(); }catch{} },delay));
-    function collectAllNoiseDisplayNodes(){
-      return collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=>{
-        const hay=strHay(n);
-        return HARDWIRED.noise.some(rx=>rx.test(hay)) || isNoise(t,p);
-      },{includeDNT:true});
+    function collectLocalNoiseDisplayNodes(){
+      return collectLocalTransportNoiseCorridorDisplayNodes(view?.map||webmap);
+    }
+    function collectStateNoiseDisplayNodes(){
+      return collectStateTransportNoiseCorridorDisplayNodes(view?.map||webmap);
     }
 
     async function prepareFcrcNativeParcelReferences(){
@@ -1323,7 +1329,7 @@ async function updateSideOverlaySummary(geom){
           }
 
           const count=await sumCounts(nodes,lotGeom);
-          return {title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,scaleText:shot.scaleText,legendHTML:legendParts.join(""),count};
+          return {title,id:"rpt-"+slug(title),dataUrl:shot.dataUrl,scaleText:shot.scaleText,legendHTML:legendParts.join(""),count,overlayLayers:targets.map(n=>String(n?.title||"").trim()).filter(Boolean)};
         });
       } finally {
         for(const [n,op] of opSnap){ try{n.opacity=op;}catch{} }
@@ -1342,9 +1348,10 @@ async function updateSideOverlaySummary(geom){
 
     async function addMandatorySection(shots, title, collectorFn, geom, baseShot, emptyNote){
       try{
-        const {nodes,captureOptions} = await prepareMandatoryOverlayReportSection(view.map,title,collectorFn);
+        const {nodes,captureOptions} = await prepareMandatoryOverlayReportSection(view.map,title,collectorFn,{geometry:geom});
         if(nodes.length){
-          const s = await screenshotFor(nodes, title, geom, false, captureOptions);
+          const restoreTncFilter=applyTransportNoiseCorridorFeatureFilter(nodes,captureOptions?.tncObjectIdsByNode);
+          const s = await screenshotFor(nodes, title, geom, false, captureOptions).finally(restoreTncFilter);
           if(!s){ shots.push({title,id:"rpt-"+slug(title),dataUrl:baseShot.dataUrl,scaleText:baseShot.scaleText,legendHTML:"",count:0,note:emptyNote}); }
           else { if((s.count||0)===0) s.note=emptyNote; shots.push(s); }
         }else{
@@ -1399,6 +1406,8 @@ async function updateSideOverlaySummary(geom){
     // headless browser session started by the report API.
     window.__LOT_WISE_REPORT_AUTOMATION__ = Object.freeze({
       focusOnLotPlan: (lot, plan) => focusOnLotPlan(lot, plan),
+      getView: () => view,
+      getSelectionLayer: () => selLayer,
       buildReport: () => buildAndOpenReport()
     });
 
@@ -1463,13 +1472,14 @@ async function updateSideOverlaySummary(geom){
         const shots=[];
         const tasks=[
           ["Zoning", async()=>{ if(cats.zoning.length){ const s=await screenshotFor(cats.zoning,"Zoning",geom,true); if(s) shots.push(s); }}],
-          ["Bushfire", async()=>{ await addMandatorySection(shots,"Bushfire",collectAllBushfireDisplayNodes,geom,overlayBaseShot,"No bushfire Level"); }],
-          ["FFDI", async()=>{ await addMandatorySection(shots,"FFDI",collectAllFFDIDisplayNodes,geom,overlayBaseShot,"No FFDI layer"); }],
-          ["Utilities", async()=>{ const all=collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=> isUtility(t,id,tg)||isWaterOrSewer(p),{includeDNT:true}); if(all.length){ const s=await screenshotFor(all,"Utilities",geom,false,{forceAllVisible:true,legendUseExtent:true,legendAllRendererItems:true}); if(s) shots.push(s); } }],
+          ["Local bushfire", async()=>{ await addMandatorySection(shots,"Bushfire - Local Planning Scheme",collectLocalBushfireDisplayNodes,geom,overlayBaseShot,"No local bushfire level"); }],
+          ["State bushfire", async()=>{ await addMandatorySection(shots,"Bushfire - Queensland State Mapping",collectStateBushfireDisplayNodes,geom,overlayBaseShot,"No state bushfire level"); }],
+          ["Utilities", async()=>{ await addMandatorySection(shots,"Utilities",()=>collectLeafDisplayNodesByPredicate((n,t,p,id,tg)=>isUtility(t,id,tg)||isWaterOrSewer(p),{includeDNT:true}),geom,overlayBaseShot,"No utility overlay triggered for this property."); }],
           ["Acid overlays", async()=>{ if(cats.acid.length){ const s=await screenshotFor(cats.acid,"Acid overlays",geom); if(s) shots.push(s); }}],
           ["Transport", async()=>{ if(cats.transport.length){ const s=await screenshotFor(cats.transport,"Transport",geom); if(s) shots.push(s); }}],
           ["Air quality", async()=>{ if(cats.air.length){ const s=await screenshotFor(cats.air,"Air quality",geom); if(s) shots.push(s); }}],
-          ["Transport Noise Corridor", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor",collectAllNoiseDisplayNodes,geom,overlayBaseShot,"No Transport Noise Level"); }],
+          ["Local TNC", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor - Local Mapping",collectLocalNoiseDisplayNodes,geom,overlayBaseShot,"No local Transport Noise Corridor level"); }],
+          ["State TNC", async()=>{ await addMandatorySection(shots,"Transport Noise Corridor - Queensland State Mapping",collectStateNoiseDisplayNodes,geom,overlayBaseShot,"No state Transport Noise Corridor level"); }],
           ["Other overlays", async()=>{ for (const n of cats.others) { const s = await screenshotFor([n], n.title || "Overlay", geom); if (s) shots.push(s); } }]
         ];
         for(let i=0;i<tasks.length;i++){
@@ -1477,7 +1487,8 @@ async function updateSideOverlaySummary(geom){
           setRpt(`Rendering ${name}...`, 55 + Math.round(((i+1)/tasks.length)*30));
           await fn();
         }
-        dedupeShotsByTitle(shots,"Transport Noise Corridor");
+        dedupeShotsByTitle(shots,"Transport Noise Corridor - Local Mapping");
+        dedupeShotsByTitle(shots,"Transport Noise Corridor - Queensland State Mapping");
         setRpt("Overlays rendered", 87, "rptS3");
         let qscfData=null;
         if(geom){

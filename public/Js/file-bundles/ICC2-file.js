@@ -2429,12 +2429,17 @@
       };
     }
     try {
-      const res = await fetch(`/api/check-token?key=${encodeURIComponent(key)}`, {
+      const query = key ? `?key=${encodeURIComponent(key)}` : '';
+      const res = await fetch(`/api/access-status${query}`, {
         cache: 'no-store'
       });
       if (res.ok) {
         const json = await res.json();
-        return { ok: true, expiresAt: json.expiresAt };
+        return {
+          ok: true,
+          accessType: json.accessType || 'paid',
+          expiresAt: json.expiresAt || null
+        };
       }
       const text = await res.text();
       let message = 'Access denied.';
@@ -2801,12 +2806,26 @@
       }
 
   // Extracted from ICC2.html. Keep this file as the independent page brain for ICC2.
-/* ---------------- ArcGIS imports ---------------- */
-const { default: Portal } = await import("https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js");const { default: WebMap } = await import("https://js.arcgis.com/4.30/@arcgis/core/WebMap.js");const { default: MapView } = await import("https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js");const { default: Graphic } = await import("https://js.arcgis.com/4.30/@arcgis/core/Graphic.js");const { default: GraphicsLayer } = await import("https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js");
+  /* ---------------- ArcGIS imports ---------------- */
+  const { default: Portal } = await import("https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js");
+  const { default: WebMap } = await import("https://js.arcgis.com/4.30/@arcgis/core/WebMap.js");
+  const { default: MapView } = await import("https://js.arcgis.com/4.30/@arcgis/core/views/MapView.js");
+  const { default: Graphic } = await import("https://js.arcgis.com/4.30/@arcgis/core/Graphic.js");
+  const { default: GraphicsLayer } = await import("https://js.arcgis.com/4.30/@arcgis/core/layers/GraphicsLayer.js");
   const { default: GroupLayer } = await import("https://js.arcgis.com/4.30/@arcgis/core/layers/GroupLayer.js");
   const { default: FeatureLayer } = await import("https://js.arcgis.com/4.30/@arcgis/core/layers/FeatureLayer.js");
-  const { default: Search } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js");const { default: Expand } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Expand.js");const { default: ScaleBar } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/ScaleBar.js");const { default: Home } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Home.js");const { default: LayerList } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/LayerList.js");const { default: Legend } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Legend.js");const { default: BasemapGallery } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/BasemapGallery.js");const { default: Fullscreen } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Fullscreen.js");
-const reactiveUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js");const geometryEngine = await import("https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js");const symbolUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js");const locator = await import("https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js");
+  const { default: Search } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js");
+  const { default: Expand } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Expand.js");
+  const { default: ScaleBar } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/ScaleBar.js");
+  const { default: Home } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Home.js");
+  const { default: LayerList } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/LayerList.js");
+  const { default: Legend } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Legend.js");
+  const { default: BasemapGallery } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/BasemapGallery.js");
+  const { default: Fullscreen } = await import("https://js.arcgis.com/4.30/@arcgis/core/widgets/Fullscreen.js");
+  const reactiveUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/core/reactiveUtils.js");
+  const geometryEngine = await import("https://js.arcgis.com/4.30/@arcgis/core/geometry/geometryEngine.js");
+  const symbolUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/symbols/support/symbolUtils.js");
+  const locator = await import("https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js");
   const { default: esriConfig } = await import("https://js.arcgis.com/4.30/@arcgis/core/config.js");
       /* ---------------- Tunables ---------------- */
       const TOUCH_BUFFER_M = 6;
@@ -2842,13 +2861,14 @@ const reactiveUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/core
 
       /* ---------------- Small helpers ---------------- */
       const waitViewIdle=async function(extra){ extra = (typeof extra==="number")?extra:240; try{ await reactiveUtils.whenOnce(function(){ return !view.updating; }); }catch(e){} await raf(); await sleep(extra); };
-    const valOr=function(v,def){ return (v===undefined||v===null)?def:v; };
+      const valOr=function(v,def){ return (v===undefined||v===null)?def:v; };
 
       /* ---------------- Access gate ---------------- */
       const accessState = {
         key: null,
         expiresAt: null,
         active: false,
+        accessType: null,
         paymentUrl: null
       };
 
@@ -2895,32 +2915,34 @@ const reactiveUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/core
           return;
         }
 
-        if(!accessState.key){
-          setGateMessage("Payment required", "A valid purchase is required to use this map.");
-          setGateVisible(true);
-          return;
-        }
-
         var result = await checkToken(accessState.key);
         if(!result.ok){
-          setGateMessage("Access denied", result.error || "This access link is invalid or expired.");
+          setGateMessage(
+            accessState.key ? "Access denied" : "Payment required",
+            accessState.key
+              ? (result.error || "This access link is invalid or expired.")
+              : "A valid purchase is required to use this map."
+          );
           setGateVisible(true);
           return;
         }
 
         accessState.active = true;
+        accessState.accessType = result.accessType || "paid";
         accessState.expiresAt = result.expiresAt;
         setGateVisible(false);
       };
 
       const isAccessActive = function(){
         if(window.__LOT_WISE_FILE_MODE__) return false;
+        if(accessState.active && accessState.accessType === "internal") return true;
         if(!accessState.active || !accessState.expiresAt) return false;
         return new Date(accessState.expiresAt) > new Date();
       };
 
       const finalizeTokenAndLock = async function(){
         if(window.__LOT_WISE_FILE_MODE__) return;
+        if(accessState.accessType === "internal") return;
         if(!accessState.key){
           setGateMessage("Payment required", "A valid purchase is required to use this map.");
           setGateVisible(true);
@@ -3761,7 +3783,7 @@ const reactiveUtils = await import("https://js.arcgis.com/4.30/@arcgis/core/core
           }
         });
       }
-    function reportScaleText(){
+      function reportScaleText(){
         return reportMapScaleText(getReportMapScale(view));
       }
       function withReportScale(shot){

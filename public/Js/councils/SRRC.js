@@ -115,6 +115,7 @@ import {
       key: null,
       expiresAt: null,
       active: false,
+      accessType: null,
       paymentUrl: null
     };
 
@@ -161,32 +162,34 @@ import {
         return;
       }
 
-      if(!accessState.key){
-        setGateMessage("Payment required", "A valid purchase is required to use this map.");
-        setGateVisible(true);
-        return;
-      }
-
       const result = await checkToken(accessState.key);
       if(!result.ok){
-        setGateMessage("Access denied", result.error || "This access link is invalid or expired.");
+        setGateMessage(
+          accessState.key ? "Access denied" : "Payment required",
+          accessState.key
+            ? (result.error || "This access link is invalid or expired.")
+            : "A valid purchase is required to use this map."
+        );
         setGateVisible(true);
         return;
       }
 
       accessState.active = true;
+      accessState.accessType = result.accessType || "paid";
       accessState.expiresAt = result.expiresAt;
       setGateVisible(false);
     };
 
     const isAccessActive = ()=>{
       if(window.__LOT_WISE_FILE_MODE__) return false;
+      if(accessState.active && accessState.accessType === "internal") return true;
       if(!accessState.active || !accessState.expiresAt) return false;
       return new Date(accessState.expiresAt) > new Date();
     };
 
     const finalizeTokenAndLock = async()=>{
       if(window.__LOT_WISE_FILE_MODE__) return;
+      if(accessState.accessType === "internal") return;
       if(!accessState.key){
         setGateMessage("Payment required", "A valid purchase is required to use this map.");
         setGateVisible(true);

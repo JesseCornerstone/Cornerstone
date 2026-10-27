@@ -19,6 +19,17 @@ const app = express();
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const SESSION_SECRET = (process.env.SESSION_SECRET || '').trim();
 const TOKEN_ISSUER_API_KEY = (process.env.TOKEN_ISSUER_API_KEY || '').trim();
+const INTERNAL_ACCESS_ENABLED =
+  String(process.env.INTERNAL_ACCESS_ENABLED || '').trim().toLowerCase() ===
+  'true';
+const INTERNAL_ACCESS_HOST = (process.env.INTERNAL_ACCESS_HOST || '')
+  .trim()
+  .toLowerCase();
+const INTERNAL_ACCESS_REQUIRE_LOOPBACK =
+  String(process.env.INTERNAL_ACCESS_REQUIRE_LOOPBACK || 'true')
+    .trim()
+    .toLowerCase() !== 'false';
+const HOST = (process.env.HOST || '0.0.0.0').trim();
 
 if (IS_PRODUCTION && SESSION_SECRET.length < 32) {
   throw new Error('SESSION_SECRET must be set to at least 32 characters in production.');
@@ -202,6 +213,36 @@ function safeStringEqual(left, right) {
   const rightBuffer = Buffer.from(String(right || ''), 'utf8');
   if (leftBuffer.length !== rightBuffer.length) return false;
   return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function isLoopbackAddress(address) {
+  const value = String(address || '').trim().toLowerCase();
+  return (
+    value === '127.0.0.1' ||
+    value === '::1' ||
+    value === '::ffff:127.0.0.1'
+  );
+}
+
+function isInternalAccessRequest(req) {
+  if (!INTERNAL_ACCESS_ENABLED) return false;
+
+  // Tailscale Serve proxies the HTTPS request to this local HTTP service.
+  // Checking the socket (not X-Forwarded-For) prevents a browser from
+  // claiming a Tailscale address in a spoofed forwarding header.
+  if (
+    INTERNAL_ACCESS_REQUIRE_LOOPBACK &&
+    !isLoopbackAddress(req.socket?.remoteAddress)
+  ) {
+    return false;
+  }
+
+  if (INTERNAL_ACCESS_HOST) {
+    const requestHost = String(req.hostname || '').trim().toLowerCase();
+    if (!safeStringEqual(requestHost, INTERNAL_ACCESS_HOST)) return false;
+  }
+
+  return true;
 }
 
 function tokenIssuerKeyFromRequest(req) {
@@ -596,12 +637,17 @@ app.post('/api/create-token', requireTokenIssuerKey, async (req, res) => {
   }
 });
 
-// Check token validity without consuming it
-// GET /api/check-token?key=...
-app.get('/api/check-token', async (req, res) => {
+// Resolve access without consuming a paid token. Internal access is disabled
+// unless the server is explicitly configured behind a trusted local proxy.
+async function checkAccess(req, res) {
   try {
-    const key = String(req.query.key || '').trim();
     res.setHeader('Cache-Control', 'no-store');
+
+    if (isInternalAccessRequest(req)) {
+      return res.json({ ok: true, accessType: 'internal' });
+    }
+
+    const key = String(req.query.key || '').trim();
     if (!key || key.length > 256) {
       return res.status(400).json({ ok: false, error: 'Missing key.' });
     }
@@ -619,13 +665,22 @@ app.get('/api/check-token', async (req, res) => {
 
     return res.json({
       ok: true,
+      accessType: 'paid',
       expiresAt: new Date(rec.expiresAt).toISOString()
     });
   } catch (err) {
-    console.error('Error in /api/check-token:', err);
-    return res.status(500).json({ ok: false, error: 'Failed to check token.' });
+    console.error('Error while checking access:', err);
+    return res.status(500).json({ ok: false, error: 'Failed to check access.' });
   }
-});
+}
+
+// Preferred endpoint used by current map pages.
+// GET /api/access-status?key=...
+app.get('/api/access-status', checkAccess);
+
+// Backwards-compatible endpoint used by older cached map pages.
+// GET /api/check-token?key=...
+app.get('/api/check-token', checkAccess);
 
 // Finalise (use) a token after printing
 // POST /api/finalise-token?key=...
@@ -875,6 +930,8 @@ app.use(
 );
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Lot Companion application service listening on port ${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(
+    `Lot Companion application service listening on http://${HOST}:${PORT}`
+  );
 });

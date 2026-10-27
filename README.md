@@ -28,6 +28,17 @@ Required production secrets include:
 
 Set `FRONTEND_ORIGIN` to the permitted browser origin. Multiple origins can be supplied as a comma-separated list.
 
+### Tailscale staff access
+
+The same build can allow staff access when it is placed behind Tailscale Serve.
+On the Tailscale host only, set `INTERNAL_ACCESS_ENABLED=true`, set
+`INTERNAL_ACCESS_HOST` to the exact `*.ts.net` hostname without a port, and
+leave `INTERNAL_ACCESS_REQUIRE_LOOPBACK=true`. Never enable this setting on the
+public Azure deployment. The server validates the direct proxy connection and
+does not trust client-supplied forwarding headers. Do not expose the internal
+port with Tailscale Funnel or any public reverse proxy; it is intended for
+tailnet-only Tailscale Serve access.
+
 ## Build offline pages
 
 Regenerate the `*-file.html` pages and their bundles after changing shared map code:

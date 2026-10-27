@@ -1730,12 +1730,17 @@ export const checkToken = async key => {
     };
   }
   try {
-    const res = await fetch(`/api/check-token?key=${encodeURIComponent(key)}`, {
+    const query = key ? `?key=${encodeURIComponent(key)}` : '';
+    const res = await fetch(`/api/access-status${query}`, {
       cache: 'no-store'
     });
     if (res.ok) {
       const json = await res.json();
-      return { ok: true, expiresAt: json.expiresAt };
+      return {
+        ok: true,
+        accessType: json.accessType || 'paid',
+        expiresAt: json.expiresAt || null
+      };
     }
     const text = await res.text();
     let message = 'Access denied.';

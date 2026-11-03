@@ -856,6 +856,7 @@
   const layerListTopLevelCategory = layer => {
     const title = String(layer?.title || '').trim();
     if (isQueenslandStateBushfireLayer(layer)) return 'state-bushfire';
+    if (isQueenslandStateHeritageLayer(layer)) return 'state-heritage';
     if (/\b(?:utilit(?:y|ies|es)|utilis(?:e|es))\b/i.test(title)) return 'utilities';
     if (/\bzoning\b/i.test(title) || /^zones?$/i.test(title)) return 'zoning';
     if (/\bprecincts?\b/i.test(title)) return 'precinct';
@@ -1058,6 +1059,179 @@
     [0, 400, 1200, 3500].forEach(delay => setTimeout(attach, delay));
     return attach;
   };
+
+  const QUEENSLAND_STATE_HERITAGE_LAYER_URL =
+    'https://spatial-gis.information.qld.gov.au/arcgis/rest/services/Environment/EnvironmentallySensitiveAreasCategoryB/MapServer/270';
+  const QUEENSLAND_STATE_HERITAGE_REPORT_TITLE = 'State Heritage - Queensland State Mapping';
+  const queenslandStateHeritageLayers = new WeakMap();
+
+  const isQueenslandStateHeritageLayer = node => {
+    if (!node) return false;
+    const text = [node.id, node.title, node.url, node.portalItem?.title]
+      .filter(Boolean)
+      .join(' ');
+    return /(?:lotwise-qld-state-heritage|EnvironmentallySensitiveAreasCategoryB\/MapServer\/270\b)/i.test(text);
+  };
+
+  const findQueenslandStateHeritageLayer = root => {
+    let match = null;
+    const seen = new Set();
+    const visit = node => {
+      if (!node || match || seen.has(node)) return;
+      seen.add(node);
+      if (node !== root && isQueenslandStateHeritageLayer(node)) {
+        match = node;
+        return;
+      }
+      for (const key of ['layers', 'sublayers']) {
+        const collection = node[key];
+        if (!collection) continue;
+        try {
+          const children = typeof collection.toArray === 'function'
+            ? collection.toArray()
+            : (Array.isArray(collection) ? collection : [...collection]);
+          children.forEach(visit);
+        } catch {}
+      }
+    };
+    visit(root);
+    return match;
+  };
+
+  /** Add the authoritative Queensland Heritage Register boundary overlay. */
+  const ensureQueenslandStateHeritageLayer = (map, FeatureLayer) => {
+    if (!map || typeof FeatureLayer !== 'function') return null;
+    let layer = queenslandStateHeritageLayers.get(map) || findQueenslandStateHeritageLayer(map);
+    if (!layer) {
+      try {
+        layer = new FeatureLayer({
+          id: 'lotwise-qld-state-heritage',
+          url: QUEENSLAND_STATE_HERITAGE_LAYER_URL,
+          title: QUEENSLAND_STATE_HERITAGE_REPORT_TITLE,
+          listMode: 'show',
+          visible: false,
+          opacity: 0.72,
+          minScale: 0,
+          maxScale: 0,
+          outFields: ['objectid', 'place_id', 'placename', 'status', 'entrydate'],
+          popupEnabled: true,
+          popupTemplate: {
+            title: '{placename}',
+            content: [{
+              type: 'fields',
+              fieldInfos: [
+                { fieldName: 'place_id', label: 'Queensland Heritage Register ID' },
+                { fieldName: 'status', label: 'Status' },
+                { fieldName: 'entrydate', label: 'Entry date', format: { dateFormat: 'short-date' } }
+              ]
+            }]
+          }
+        });
+        if (typeof map.add === 'function') map.add(layer);
+        else if (typeof map.layers?.add === 'function') map.layers.add(layer);
+      } catch {
+        return null;
+      }
+      queenslandStateHeritageLayers.set(map, layer);
+    }
+    try { layer.title = QUEENSLAND_STATE_HERITAGE_REPORT_TITLE; } catch {}
+    try { layer.listMode = 'show'; } catch {}
+    try { layer.visible = false; } catch {}
+    try { layer.opacity = 0.72; } catch {}
+    try { layer.minScale = 0; layer.maxScale = 0; } catch {}
+    return layer;
+  };
+
+  /** Attach the statewide heritage overlay after each council map is ready. */
+  const scheduleQueenslandStateHeritageLayer = (resolveMap, FeatureLayer) => {
+    const attach = () => {
+      try {
+        const map = typeof resolveMap === 'function' ? resolveMap() : resolveMap;
+        if (map?.layers) ensureQueenslandStateHeritageLayer(map, FeatureLayer);
+      } catch {}
+    };
+    [0, 400, 1200, 3500].forEach(delay => setTimeout(attach, delay));
+    return attach;
+  };
+
+  /**
+   * Add State Heritage to a report only when the selected lot intersects the
+   * Queensland Heritage Register. Existing auto-collected copies are removed so
+   * the strict lot-intersection result is the single source of truth.
+   */
+  async function addTriggeredStateHeritageReportSection({
+    shots,
+    map,
+    FeatureLayer,
+    geometry,
+    screenshotFor,
+    baseShot
+  } = {}) {
+    if (!Array.isArray(shots)) return false;
+
+    const titleKey = QUEENSLAND_STATE_HERITAGE_REPORT_TITLE.toLowerCase();
+    for (let index = shots.length - 1; index >= 0; index -= 1) {
+      if (String(shots[index]?.title || '').trim().toLowerCase() === titleKey) shots.splice(index, 1);
+    }
+
+    const layer = ensureQueenslandStateHeritageLayer(map, FeatureLayer);
+    if (!layer || !geometry || typeof screenshotFor !== 'function') return false;
+
+    try {
+      if (typeof layer.load === 'function') {
+        let timer = null;
+        try {
+          await Promise.race([
+            Promise.resolve(layer.load()),
+            new Promise((_, reject) => {
+              timer = setTimeout(() => reject(new Error('state heritage layer load timed out')), 8000);
+            })
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      }
+
+      const hits = await queryStrictOverlayFeatureHits(layer, geometry, { timeoutMs: 10000 });
+      const hitCount = Math.max(hits.ids?.length || 0, hits.features?.length || 0);
+      if (!hitCount) return false;
+
+      const placeNames = [...new Set((hits.features || [])
+        .map(feature => String(feature?.attributes?.placename || '').trim())
+        .filter(Boolean))];
+      const note = placeNames.length
+        ? `Queensland Heritage Register: ${placeNames.join(', ')}`
+        : 'The selected lot intersects the Queensland Heritage Register.';
+      const shot = await screenshotFor(
+        [layer],
+        QUEENSLAND_STATE_HERITAGE_REPORT_TITLE,
+        geometry,
+        true,
+        { forceAllVisible: true, legendStrictLotIntersection: true }
+      );
+
+      if (shot) {
+        shot.count = Math.max(Number(shot.count) || 0, hitCount);
+        shot.note = note;
+        shots.push(shot);
+      } else if (baseShot?.dataUrl) {
+        shots.push({
+          title: QUEENSLAND_STATE_HERITAGE_REPORT_TITLE,
+          id: `rpt-${slug(QUEENSLAND_STATE_HERITAGE_REPORT_TITLE)}`,
+          dataUrl: baseShot.dataUrl,
+          scaleText: baseShot.scaleText,
+          legendHTML: '',
+          count: hitCount,
+          note: `${note} The overlay image was unavailable.`,
+          overlayLayers: [QUEENSLAND_STATE_HERITAGE_REPORT_TITLE]
+        });
+      }
+      return true;
+    } catch (error) {
+      try { console.warn('State heritage report check failed:', error); } catch {}
+      return false;
+    }
+  }
 
   // Transport-noise layers are authored differently by each council. Some use a
   // descriptive title while others expose only codes such as TNC_SM3. Keep the
@@ -3006,6 +3180,7 @@
   const locator = await import("https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js");
   const { default: esriConfig } = await import("https://js.arcgis.com/4.30/@arcgis/core/config.js");
       scheduleQueenslandStateBushfireLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
+      scheduleQueenslandStateHeritageLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
 
       /* ---------------- Tunables ---------------- */
       const TOUCH_BUFFER_M = 6;
@@ -5035,6 +5210,7 @@
             setRpt(`Rendering ${name}...`, 55 + Math.round(((i+1)/tasks.length)*30));
             await fn();
           }
+          await addTriggeredStateHeritageReportSection({shots,map:view?.map||webmap,FeatureLayer,geometry:geom,screenshotFor,baseShot:overlayBaseShot});
           dedupeShotsByTitle(shots,"Transport Noise Corridor - Local Mapping");
           dedupeShotsByTitle(shots,"Transport Noise Corridor - Queensland State Mapping");
           setRpt("Overlays rendered", 87, "rptS3");

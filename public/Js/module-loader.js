@@ -5,7 +5,7 @@
   if (!modulePath) return;
   if (window.location.protocol === 'file:') return;
 
-  var version = '20261008-tnc-key-split';
+  var version = '20261103-state-heritage';
   var moduleUrl = new URL(modulePath, document.baseURI);
   if (!moduleUrl.searchParams.has('v')) moduleUrl.searchParams.set('v', version);
 

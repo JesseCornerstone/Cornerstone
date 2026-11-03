@@ -16,6 +16,7 @@
     "test:mbrc-search": "node scripts/test-mbrc-search.js",
     "test:search-selection": "node scripts/test-search-selection.js",
     "test:council-base": "node scripts/test-council-base-functions.js",
+    "test:state-heritage": "node scripts/test-state-heritage.js",
     "test:interactive-report": "node scripts/test-interactive-report-map.js",
     "local": "node mapping-app.js",
     "serve:local": "node local-static-server.js",

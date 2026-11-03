@@ -5,6 +5,7 @@ import {
   attrEsc,
   applyReportMapScale,
   applyTransportNoiseCorridorFeatureFilter,
+  addTriggeredStateHeritageReportSection,
   backgroundFactor,
   composeLandscapePropertyReport,
   queryQueenslandCadastralData,
@@ -16,6 +17,7 @@ import {
   ensureQueenslandStateBushfireLayer,
   isQueenslandStateBushfireLayer,
   scheduleQueenslandStateBushfireLayer,
+  scheduleQueenslandStateHeritageLayer,
   organizePlanningSchemeLayers,
   initPodUpload,
   isQueenslandFfdiLayer,
@@ -42,7 +44,7 @@ import {
   prepareNativeParcelReferences,
   wireSearchResultSelection,
   withSatelliteBasemap
-} from "../council-hub.js?v=20261009-high-resolution-pdf";
+} from "../council-hub.js?v=20261103-state-heritage";
     /* ---------------- ArcGIS imports ---------------- */
     import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
     import WebMap from "https://js.arcgis.com/4.30/@arcgis/core/WebMap.js";
@@ -65,6 +67,7 @@ import {
     import * as locator from "https://js.arcgis.com/4.30/@arcgis/core/rest/locator.js";
     import esriConfig from "https://js.arcgis.com/4.30/@arcgis/core/config.js";
     scheduleQueenslandStateBushfireLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
+    scheduleQueenslandStateHeritageLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
 
     /* ---------------- Tunables ---------------- */
     const TOUCH_BUFFER_M = 6;
@@ -1288,6 +1291,7 @@ view.ui.add(new Home({view:view}),"top-left");
           setRpt("Rendering " + name + "...", 55 + Math.round(((ti+1)/tasks.length)*30));
           await fn();
         }
+        await addTriggeredStateHeritageReportSection({shots,map:view?.map||webmap,FeatureLayer,geometry:geom,screenshotFor,baseShot:overlayBaseShot});
         dedupeShotsByTitle(shots,"Transport Noise Corridor - Local Mapping");
         dedupeShotsByTitle(shots,"Transport Noise Corridor - Queensland State Mapping");
         setRpt("Overlays rendered", 87, "rptS3");

@@ -91,8 +91,79 @@ async function main() {
   assert.notEqual(replacementStateBushfireLayer, existingStateBushfireLayer);
   assert.match(replacementStateBushfireLayer.url, /WOS_PIB\/FeatureServer\/0$/);
   assert.equal(existingStateBushfireMap.layers.length, 2);
+  const stateHeritageMap = {
+    layers: [],
+    add(layer) { this.layers.push(layer); }
+  };
+  const stateHeritageLayer = hub.ensureQueenslandStateHeritageLayer(stateHeritageMap, MockFeatureLayer);
+  assert.equal(
+    hub.QUEENSLAND_STATE_HERITAGE_LAYER_URL,
+    'https://spatial-gis.information.qld.gov.au/arcgis/rest/services/Environment/EnvironmentallySensitiveAreasCategoryB/MapServer/270'
+  );
+  assert.equal(stateHeritageLayer.title, 'State Heritage - Queensland State Mapping');
+  assert.equal(stateHeritageLayer.visible, false);
+  assert.equal(stateHeritageLayer.listMode, 'show');
+  assert.equal(hub.ensureQueenslandStateHeritageLayer(stateHeritageMap, MockFeatureLayer), stateHeritageLayer);
+  assert.equal(stateHeritageMap.layers.length, 1);
+  const heritagePlanningGroup = {
+    type: 'group',
+    title: 'Planning Scheme',
+    layers: [],
+    add(layer) { this.layers.push(layer); }
+  };
+  const heritageLayerListMap = {
+    layers: [stateHeritageLayer, heritagePlanningGroup],
+    remove(layer) { this.layers = this.layers.filter(candidate => candidate !== layer); },
+    add(layer) { this.layers.push(layer); }
+  };
+  hub.organizePlanningSchemeLayers(heritageLayerListMap, function GroupLayer() {});
+  assert.ok(heritageLayerListMap.layers.includes(stateHeritageLayer), 'State heritage must remain a top-level overlay.');
+
+  let heritageTriggered = false;
+  stateHeritageLayer.objectIdField = 'objectid';
+  stateHeritageLayer.fields = [{ name: 'objectid', type: 'oid' }];
+  stateHeritageLayer.load = async () => stateHeritageLayer;
+  stateHeritageLayer.queryObjectIds = async () => heritageTriggered ? [41] : [];
+  stateHeritageLayer.queryFeatures = async () => ({
+    features: heritageTriggered
+      ? [{ attributes: { objectid: 41, place_id: 600041, placename: 'Test Heritage Place' } }]
+      : []
+  });
+  const heritageShots = [{ title: 'State Heritage - Queensland State Mapping', dataUrl: 'stale' }];
+  assert.equal(await hub.addTriggeredStateHeritageReportSection({
+    shots: heritageShots,
+    map: stateHeritageMap,
+    FeatureLayer: MockFeatureLayer,
+    geometry: { type: 'polygon' },
+    screenshotFor: async () => ({
+      title: 'State Heritage - Queensland State Mapping',
+      dataUrl: 'heritage-shot',
+      count: 0
+    }),
+    baseShot: { dataUrl: 'base-shot' }
+  }), false);
+  assert.deepEqual(heritageShots, [], 'State heritage must be omitted when the lot does not intersect it.');
+  heritageTriggered = true;
+  assert.equal(await hub.addTriggeredStateHeritageReportSection({
+    shots: heritageShots,
+    map: stateHeritageMap,
+    FeatureLayer: MockFeatureLayer,
+    geometry: { type: 'polygon' },
+    screenshotFor: async (nodes, title, geometry, legendOnLot, options) => {
+      assert.deepEqual(nodes, [stateHeritageLayer]);
+      assert.equal(title, 'State Heritage - Queensland State Mapping');
+      assert.equal(legendOnLot, true);
+      assert.equal(options.legendStrictLotIntersection, true);
+      return { title, dataUrl: 'heritage-shot', count: 0 };
+    },
+    baseShot: { dataUrl: 'base-shot' }
+  }), true);
+  assert.equal(heritageShots.length, 1);
+  assert.equal(heritageShots[0].count, 1);
+  assert.match(heritageShots[0].note, /Test Heritage Place/);
   assert.equal(hub.propertyReportMappingScope({ title: 'Bushfire - Local Planning Scheme' }), 'local');
   assert.equal(hub.propertyReportMappingScope({ title: 'Bushfire - Queensland State Mapping' }), 'state');
+  assert.equal(hub.propertyReportMappingScope({ title: 'State Heritage - Queensland State Mapping' }), 'state');
   assert.equal(hub.propertyReportMappingScope({ title: 'Transport Noise Corridor - Local Mapping' }), 'local');
   assert.equal(hub.propertyReportMappingScope({ title: 'Transport Noise Corridor - Queensland State Mapping' }), 'state');
 
@@ -437,6 +508,16 @@ async function main() {
       source,
       /scheduleQueenslandStateBushfireLayer\(\(\)=>/,
       `${council} must add state bushfire mapping before report generation.`
+    );
+    assert.match(
+      source,
+      /scheduleQueenslandStateHeritageLayer\(\(\)=>/,
+      `${council} must add State Heritage to its overlay list.`
+    );
+    assert.match(
+      source,
+      /await addTriggeredStateHeritageReportSection\(\{shots,map:view\?\.map\|\|webmap,FeatureLayer,geometry:geom,screenshotFor,baseShot:/,
+      `${council} must add State Heritage to the report only after an exact lot-intersection check.`
     );
     if (/new LayerList\(/.test(source)) {
       assert.match(

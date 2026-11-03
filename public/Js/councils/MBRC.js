@@ -5,6 +5,7 @@ import {
   attrEsc,
   applyReportMapScale,
   applyTransportNoiseCorridorFeatureFilter,
+  addTriggeredStateHeritageReportSection,
   backgroundFactor,
   composeLandscapePropertyReport,
   queryQueenslandCadastralData,
@@ -17,6 +18,7 @@ import {
   ensureQueenslandStateBushfireLayer,
   isQueenslandStateBushfireLayer,
   scheduleQueenslandStateBushfireLayer,
+  scheduleQueenslandStateHeritageLayer,
   organizePlanningSchemeLayers,
   isQueenslandFfdiLayer,
   isExactCadastralLotPlan,
@@ -47,7 +49,7 @@ import {
   prepareNativeParcelReferences,
   wireSearchResultSelection,
   withSatelliteBasemap
-} from "../council-hub.js?v=20261009-high-resolution-pdf";
+} from "../council-hub.js?v=20261103-state-heritage";
     import Portal from "https://js.arcgis.com/4.34/@arcgis/core/portal/Portal.js";
     import WebMap from "https://js.arcgis.com/4.34/@arcgis/core/WebMap.js";
     import MapView from "https://js.arcgis.com/4.34/@arcgis/core/views/MapView.js";
@@ -71,6 +73,7 @@ import {
     import * as locator from "https://js.arcgis.com/4.34/@arcgis/core/rest/locator.js";
     import esriConfig from "https://js.arcgis.com/4.34/@arcgis/core/config.js";
     scheduleQueenslandStateBushfireLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
+    scheduleQueenslandStateHeritageLayer(()=> (typeof view!=="undefined" && view?.map) || (typeof webmap!=="undefined" ? webmap : null),FeatureLayer);
 
     /* ---------------- Tunables ---------------- */
     const TOUCH_BUFFER_M = 6;
@@ -3180,6 +3183,7 @@ async function updateSideOverlaySummary(geom){
           setRpt(`Rendering ${name}…`, 55 + Math.round(((i+1)/tasks.length)*30));
           await fn();
         }
+        await addTriggeredStateHeritageReportSection({shots,map:view?.map||webmap,FeatureLayer,geometry:geom,screenshotFor,baseShot:fallbackShot});
         setRpt("Overlays rendered", 87, "rptS3");
         let qscfData=null;
         if(geom){

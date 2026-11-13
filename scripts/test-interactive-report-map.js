@@ -92,59 +92,40 @@ async function main() {
       selectedMaxScale: 0
     });
 
-    await page.waitForSelector('#interactivePropertyMapFrame');
-    await page.waitForSelector('#interactivePropertyMapShell.interactive-ready', { timeout: 120000 });
-    await page.waitForFunction(() => {
-      const frame = document.getElementById('interactivePropertyMapFrame');
-      return frame?.contentDocument?.documentElement.classList.contains('lot-wise-map-only');
-    }, { timeout: 120000 });
+    await page.waitForSelector('#propertyMapImage.report-panzoom');
     const screenResult = await page.evaluate(() => {
-      const shell = document.getElementById('interactivePropertyMapShell');
-      const frame = document.getElementById('interactivePropertyMapFrame');
-      const childDocument = frame.contentDocument;
-      const childAutomation = frame.contentWindow?.__LOT_WISE_REPORT_AUTOMATION__;
-      const childView = childAutomation?.getView?.();
-      const childSelectionLayer = childAutomation?.getSelectionLayer?.();
-      const visibleNonSelectionLayers = childView?.map?.layers?.toArray?.()
-        .filter(layer => layer.visible && layer !== childSelectionLayer).length;
+      const propertyMap = document.getElementById('propertyMapImage');
+      const image = propertyMap?.querySelector('.property-map-static.report-panzoom-image');
       return {
-        ready: shell.classList.contains('interactive-ready'),
-        frameHref: frame?.src || '',
-        singleLotButtonCount: document.querySelectorAll('.interactive-report-button, .property-meta .badge-link').length,
-        overlayLiveMapButtonCount: document.querySelectorAll('.overlay-actions .badge-link').length,
-        hasMapRoot: Boolean(childDocument?.querySelector('#viewDiv .esri-view-root')),
-        childMapOnly: childDocument?.documentElement.classList.contains('lot-wise-map-only'),
-        visibleNonSelectionLayers,
-        mapWidgetDisplay: childDocument?.querySelector('#viewDiv .esri-ui-top-left')
-          ? frame.contentWindow.getComputedStyle(childDocument.querySelector('#viewDiv .esri-ui-top-left')).display
-          : null,
-        childHeaderDisplay: childDocument?.querySelector('body > header')?.style.display || '',
-        frameDisplay: getComputedStyle(frame).display,
-        staticDisplay: getComputedStyle(document.querySelector('.property-map-static')).display,
+        propertyMapFound: Boolean(propertyMap),
+        propertyImageFound: Boolean(image),
+        propertyImageSource: image?.getAttribute('src') || '',
+        propertyImageAlt: image?.getAttribute('alt') || '',
+        propertyControlCount: propertyMap?.querySelectorAll('[data-panzoom-action]').length || 0,
+        propertyHint: propertyMap?.querySelector('.panzoom-hint')?.textContent || '',
+        panzoomMapCount: document.querySelectorAll('.report-panzoom').length,
+        liveFrameCount: document.querySelectorAll('iframe, .interactive-map-frame').length,
+        liveMapStatusCount: document.querySelectorAll('.interactive-map-loading, .interactive-map-toolbar').length,
+        openFullMapCount: Array.from(document.querySelectorAll('a')).filter(link => /open full map/i.test(link.textContent)).length,
+        liveMapRequestCount: performance.getEntriesByType('resource')
+          .filter(entry => /\/MBRC\.html(?:[?#]|$)/i.test(entry.name)).length,
         exportBarDisplay: getComputedStyle(document.querySelector('.report-export-bar')).display
       };
     });
-    assert.equal(screenResult.ready, true);
-    assert.equal(screenResult.singleLotButtonCount, 0);
-    const frameTarget = new URL(screenResult.frameHref);
-    assert.equal(frameTarget.pathname, '/MBRC.html');
-    assert.equal(frameTarget.searchParams.get('interactiveMap'), '1');
-    assert.equal(frameTarget.searchParams.get('mapOnly'), '1');
-    assert.equal(frameTarget.searchParams.get('lot'), '636');
-    assert.equal(frameTarget.searchParams.get('plan'), 'SP350483');
-    assert.equal(frameTarget.searchParams.get('overlay'), 'Report overlays');
-    assert.deepEqual(frameTarget.searchParams.getAll('layer'), ['MBRC Zoning Test']);
-    assert.equal(screenResult.overlayLiveMapButtonCount, 0);
-    assert.equal(screenResult.hasMapRoot, true);
-    assert.equal(screenResult.childMapOnly, true);
-    assert.equal(screenResult.visibleNonSelectionLayers, 0);
-    assert.ok(screenResult.mapWidgetDisplay === null || screenResult.mapWidgetDisplay === 'none');
-    assert.equal(screenResult.childHeaderDisplay, 'none');
-    assert.notEqual(screenResult.frameDisplay, 'none');
-    assert.equal(screenResult.staticDisplay, 'block');
+    assert.equal(screenResult.propertyMapFound, true);
+    assert.equal(screenResult.propertyImageFound, true);
+    assert.match(screenResult.propertyImageSource, /^data:image\/gif;base64,/);
+    assert.match(screenResult.propertyImageAlt, /aerial map/i);
+    assert.equal(screenResult.propertyControlCount, 3);
+    assert.match(screenResult.propertyHint, /scroll or pinch to zoom/i);
+    assert.equal(screenResult.panzoomMapCount, 2);
+    assert.equal(screenResult.liveFrameCount, 0);
+    assert.equal(screenResult.liveMapStatusCount, 0);
+    assert.equal(screenResult.openFullMapCount, 0);
+    assert.equal(screenResult.liveMapRequestCount, 0);
     assert.notEqual(screenResult.exportBarDisplay, 'none');
 
-    const panzoom = await page.$('.report-panzoom');
+    const panzoom = await page.$('#propertyMapImage');
     await panzoom.evaluate(element => element.scrollIntoView({ block: 'center' }));
     const panzoomBox = await panzoom.boundingBox();
     assert.ok(panzoomBox && panzoomBox.width > 0 && panzoomBox.height > 0);
@@ -160,7 +141,7 @@ async function main() {
         clientY: rect.top + rect.height / 2
       }));
     });
-    await page.waitForFunction(() => Number(document.querySelector('.report-panzoom')?.dataset.zoom || 1) > 1);
+    await page.waitForFunction(() => Number(document.getElementById('propertyMapImage')?.dataset.zoom || 1) > 1);
     const zoomedState = await panzoom.evaluate(element => ({
       zoom: Number(element.dataset.zoom),
       level: element.querySelector('.panzoom-level')?.textContent,
@@ -188,23 +169,19 @@ async function main() {
 
     await page.emulateMediaType('print');
     const printResult = await page.evaluate(() => ({
-      frameDisplay: getComputedStyle(document.getElementById('interactivePropertyMapFrame')).display,
-      staticDisplay: getComputedStyle(document.querySelector('.property-map-static')).display,
-      staticOpacity: getComputedStyle(document.querySelector('.property-map-static')).opacity,
-      panzoomControlsDisplay: getComputedStyle(document.querySelector('.panzoom-controls')).display,
-      panzoomTransform: getComputedStyle(document.querySelector('.report-panzoom-image')).transform,
+      liveFrameCount: document.querySelectorAll('iframe, .interactive-map-frame').length,
+      staticDisplay: getComputedStyle(document.querySelector('#propertyMapImage .property-map-static')).display,
+      panzoomControlsDisplay: getComputedStyle(document.querySelector('#propertyMapImage .panzoom-controls')).display,
+      panzoomTransform: getComputedStyle(document.querySelector('#propertyMapImage .report-panzoom-image')).transform,
       exportBarDisplay: getComputedStyle(document.querySelector('.report-export-bar')).display,
-      pdfHintDisplay: getComputedStyle(document.querySelector('.pdf-map-hint')).display,
-      singleLotButtonCount: document.querySelectorAll('.interactive-report-button, .property-meta .badge-link').length
+      pdfHintDisplay: getComputedStyle(document.querySelector('#propertyMapImage .pdf-map-hint')).display
     }));
-    assert.equal(printResult.frameDisplay, 'none');
+    assert.equal(printResult.liveFrameCount, 0);
     assert.equal(printResult.staticDisplay, 'block');
-    assert.equal(printResult.staticOpacity, '1');
     assert.equal(printResult.panzoomControlsDisplay, 'none');
     assert.equal(printResult.panzoomTransform, 'none');
     assert.equal(printResult.exportBarDisplay, 'none');
     assert.equal(printResult.pdfHintDisplay, 'block');
-    assert.equal(printResult.singleLotButtonCount, 0);
     const pdf = await page.pdf({
       format: 'A4',
       landscape: true,
@@ -242,7 +219,7 @@ async function main() {
     await browser.close();
   }
 
-  console.log('Interactive report-map browser test passed.');
+  console.log('Static report-map pan/zoom browser test passed.');
 }
 
 function findBrowserExecutable() {

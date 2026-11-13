@@ -211,30 +211,33 @@ async function main() {
     detailPages: [],
     interactiveMapUrl: interactiveUrl
   };
-  const interactiveReport = hub.composeLandscapePropertyReport(reportOptions);
-  assert.match(interactiveReport, /id='interactivePropertyMapFrame'/);
-  assert.doesNotMatch(interactiveReport, /Open single-lot live map/);
-  assert.match(interactiveReport, />Open full map</);
-  assert.match(interactiveReport, /class='overlay-map report-panzoom'/);
-  assert.match(interactiveReport, /data-panzoom-action='in'/);
-  assert.match(interactiveReport, /Drag to move &middot; Scroll or pinch to zoom/);
-  assert.match(interactiveReport, /id='printStaticReport'/);
-  assert.match(interactiveReport, />Print \/ Save PDF</);
-  assert.match(interactiveReport, /\.report-export-button\{min-width:170px;min-height:52px/);
-  assert.doesNotMatch(interactiveReport, /High-resolution PDF report/);
-  assert.doesNotMatch(interactiveReport, /PDF viewer's zoom and hand\/pan controls/);
-  assert.match(interactiveReport, /class='pdf-map-hint'/);
-  assert.doesNotMatch(interactiveReport, /Download Interactive Report/);
-  assert.match(interactiveReport, /@media print[^}]*[\s\S]*interactive-map-frame/);
-  assert.match(interactiveReport, /report-panzoom-image\{transform:none!important\}/);
-  const reportScripts = [...interactiveReport.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-  assert.ok(reportScripts.length >= 2, 'The interactive report should include its map and export scripts.');
+  const report = hub.composeLandscapePropertyReport(reportOptions);
+  assert.doesNotMatch(report, /id='interactivePropertyMapFrame'/);
+  assert.doesNotMatch(report, /interactive-map-frame|Loading interactive map|Open full map/);
+  assert.doesNotMatch(report, /MBRC\.html\?interactiveMap=1/);
+  assert.match(report, /id='propertyMapImage'/);
+  assert.match(report, /class='property-map report-panzoom'/);
+  assert.match(report, /class='property-map-static report-panzoom-image'/);
+  assert.match(report, /class='overlay-map report-panzoom'/);
+  assert.match(report, /data-panzoom-action='in'/);
+  assert.match(report, /Drag to move &middot; Scroll or pinch to zoom/);
+  assert.match(report, /id='printStaticReport'/);
+  assert.match(report, />Print \/ Save PDF</);
+  assert.match(report, /\.report-export-button\{min-width:170px;min-height:52px/);
+  assert.doesNotMatch(report, /High-resolution PDF report/);
+  assert.doesNotMatch(report, /PDF viewer's zoom and hand\/pan controls/);
+  assert.match(report, /class='pdf-map-hint'/);
+  assert.doesNotMatch(report, /Download Interactive Report/);
+  assert.doesNotMatch(report, /interactive-map-frame/);
+  assert.match(report, /report-panzoom-image\{transform:none!important\}/);
+  const reportScripts = [...report.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  assert.equal(reportScripts.length, 1, 'The report should only include its static-image pan/zoom and export script.');
   reportScripts.forEach(match => new Function(match[1]));
   global.window.__LOT_WISE_VA_AUTOMATION__ = true;
   const printableReport = hub.composeLandscapePropertyReport(reportOptions);
   delete global.window.__LOT_WISE_VA_AUTOMATION__;
   assert.doesNotMatch(printableReport, /id='interactivePropertyMapFrame'/);
-  assert.doesNotMatch(printableReport, /Open single-lot live map/);
+  assert.match(printableReport, /id='propertyMapImage'/);
 
   const tncLeaf = {
     title: 'TNC_SM3',

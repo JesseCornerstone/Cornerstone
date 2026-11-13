@@ -19,6 +19,230 @@
     if (mask) mask.style.display = on ? 'flex' : 'none';
   };
 
+  const liveMeasurementTools = new WeakMap();
+  const liveMeasurementStates = new WeakMap();
+
+  const isLiveMeasurementActive = view => {
+    const measurement = liveMeasurementStates.get(view)?.measurement;
+    return measurement?.activeTool === 'distance' || measurement?.activeTool === 'area';
+  };
+
+  const getLiveMeasurementSnappingStatus = view => {
+    const state = liveMeasurementStates.get(view);
+    const snapping = state?.measurement?.activeWidget?.snappingOptions;
+    return {
+      supported: state?.snapping?.supported === true,
+      configured: state?.snapping?.configured === true,
+      enabled: snapping?.enabled === true,
+      featureEnabled: snapping?.featureEnabled === true,
+      sourceCount: Number(snapping?.featureSources?.length || 0)
+    };
+  };
+
+  const isFullLiveMap = (windowRef = typeof window !== 'undefined' ? window : null) => {
+    if (!windowRef || windowRef.__LOT_WISE_FILE_MODE__ || windowRef.__LOT_WISE_VA_AUTOMATION__) {
+      return false;
+    }
+
+    try {
+      const url = new URL(windowRef.location.href);
+      return !/\/__va-report-ui(?:\/|$)/i.test(url.pathname)
+        && url.searchParams.get('mapOnly') !== '1';
+    } catch {
+      return false;
+    }
+  };
+
+  /**
+   * Add ArcGIS' scale-aware distance and area measurement widget to a full,
+   * interactive map. File-mode pages, report automation, and the map embedded
+   * inside a report deliberately skip this control.
+   */
+  async function installLiveMeasurementTool(view, options = {}) {
+    if (!view?.ui || !isFullLiveMap()) return null;
+    if (liveMeasurementTools.has(view)) return liveMeasurementTools.get(view);
+
+    const pending = (async () => {
+      const arcgisVersion = /^\d+\.\d+$/.test(String(options.arcgisVersion || ''))
+        ? String(options.arcgisVersion)
+        : '4.30';
+      const [measurementModule, expandModule] = await Promise.all([
+        import(`https://js.arcgis.com/${arcgisVersion}/@arcgis/core/widgets/Measurement.js`),
+        import(`https://js.arcgis.com/${arcgisVersion}/@arcgis/core/widgets/Expand.js`)
+      ]);
+
+      if (!isFullLiveMap() || view.destroyed) return null;
+
+      const Measurement = measurementModule.default;
+      const Expand = expandModule.default;
+      const panel = document.createElement('div');
+      panel.className = 'esri-widget lot-wise-measurement-panel';
+      panel.setAttribute('role', 'region');
+      panel.setAttribute('aria-label', 'Map measurement tools');
+
+      const header = document.createElement('div');
+      header.className = 'lot-wise-measurement__header';
+      const titleRow = document.createElement('div');
+      titleRow.className = 'lot-wise-measurement__title-row';
+      const heading = document.createElement('strong');
+      heading.className = 'lot-wise-measurement__heading';
+      heading.textContent = 'Measure';
+      const modeStatus = document.createElement('span');
+      modeStatus.className = 'lot-wise-measurement__status';
+      modeStatus.textContent = 'Ready';
+      titleRow.append(heading, modeStatus);
+      const hint = document.createElement('p');
+      hint.className = 'lot-wise-measurement__hint';
+      hint.textContent = 'Choose a tool, then click the map. Parcel selection pauses while measuring.';
+      header.append(titleRow, hint);
+
+      const controls = document.createElement('div');
+      controls.className = 'lot-wise-measurement__controls';
+      const distanceButton = document.createElement('button');
+      const areaButton = document.createElement('button');
+      const clearButton = document.createElement('button');
+      const configureButton = (button, label, title, modifier) => {
+        button.type = 'button';
+        button.className = `lot-wise-measurement__button ${modifier}`;
+        button.textContent = label;
+        button.title = title;
+      };
+      configureButton(distanceButton, 'Distance', 'Measure ground distance', 'lot-wise-measurement__button--tool');
+      configureButton(areaButton, 'Area', 'Measure ground area', 'lot-wise-measurement__button--tool');
+      configureButton(clearButton, 'Clear', 'Clear the current measurement', 'lot-wise-measurement__button--clear');
+      controls.append(distanceButton, areaButton, clearButton);
+
+      const measurementHost = document.createElement('div');
+      measurementHost.className = 'lot-wise-measurement__body';
+      const measurement = new Measurement({ view, activeTool: null, container: measurementHost });
+      panel.append(header, controls, measurementHost);
+      const expand = new Expand({
+        id: 'lot-wise-live-measurement',
+        view,
+        content: panel,
+        expanded: false,
+        expandIconClass: 'esri-icon-measure',
+        expandTooltip: 'Measure distance or area',
+        collapseTooltip: 'Close measuring tools',
+        group: 'top-right'
+      });
+      const snappingState = {
+        supported: false,
+        configured: false
+      };
+      liveMeasurementStates.set(view, { measurement, expand, snapping: snappingState });
+
+      const hasSnappingSource = typeof options.getSnappingLayers === 'function'
+        || options.snappingLayers != null;
+      const snappingLayersReady = hasSnappingSource
+        ? (async () => {
+            const requested = typeof options.getSnappingLayers === 'function'
+              ? await options.getSnappingLayers()
+              : await options.snappingLayers;
+            const candidates = Array.isArray(requested)
+              ? requested
+              : requested
+                ? [requested]
+                : [];
+            const seen = new Set();
+            const layers = candidates.filter(layer => {
+              if (!layer || seen.has(layer)) return false;
+              seen.add(layer);
+              return layer.type === 'feature' || layer.type === 'graphics';
+            });
+
+            await Promise.allSettled(layers.map(layer => layer.load?.()));
+            await Promise.allSettled(layers.map(layer => view.whenLayerView?.(layer)));
+            return layers;
+          })().catch(error => {
+            console.warn('Measurement snapping layers could not be prepared', error);
+            return [];
+          })
+        : Promise.resolve([]);
+
+      const configureSnapping = async activeWidget => {
+        if (!hasSnappingSource || !activeWidget || !('snappingOptions' in activeWidget)) return;
+        snappingState.supported = true;
+        const layers = await snappingLayersReady;
+        if (measurement.activeWidget !== activeWidget || !layers.length) return;
+
+        const distance = Number(options.snappingDistance);
+        activeWidget.snappingOptions = {
+          enabled: true,
+          selfEnabled: true,
+          featureEnabled: true,
+          ...(Number.isFinite(distance) && distance > 0 ? { distance } : {}),
+          featureSources: layers.map(layer => ({ layer, enabled: true }))
+        };
+        snappingState.configured = activeWidget.snappingOptions?.enabled === true
+          && Number(activeWidget.snappingOptions?.featureSources?.length || 0) > 0;
+        panel.dataset.snapping = snappingState.configured ? 'ready' : 'unavailable';
+        panel.dataset.snappingSourceCount = String(activeWidget.snappingOptions?.featureSources?.length || 0);
+      };
+
+      const configureMetricUnits = activeWidget => {
+        if (!activeWidget) return;
+        const unit = measurement.activeTool === 'area' ? 'square-meters' : 'meters';
+        try { activeWidget.unitOptions = [unit]; } catch {}
+        try { activeWidget.unit = unit; } catch {}
+      };
+
+      const clearMeasurement = () => {
+        try { measurement.clear(); } catch {}
+        try { measurement.activeTool = null; } catch {}
+      };
+      const clearForReport = () => {
+        clearMeasurement();
+        try { expand.expanded = false; } catch {}
+      };
+
+      const selectTool = tool => {
+        try { measurement.clear(); } catch {}
+        measurement.activeTool = tool;
+      };
+      const updateButtons = activeTool => {
+        const active = activeTool === 'distance' || activeTool === 'area';
+        distanceButton.setAttribute('aria-pressed', String(activeTool === 'distance'));
+        areaButton.setAttribute('aria-pressed', String(activeTool === 'area'));
+        clearButton.disabled = !active;
+        panel.classList.toggle('is-active', active);
+        modeStatus.textContent = active ? 'Measuring' : 'Ready';
+      };
+      distanceButton.addEventListener('click', () => selectTool('distance'));
+      areaButton.addEventListener('click', () => selectTool('area'));
+      clearButton.addEventListener('click', clearMeasurement);
+      measurement.watch('activeTool', updateButtons);
+      measurement.watch('activeWidget', activeWidget => {
+        configureMetricUnits(activeWidget);
+        configureSnapping(activeWidget).catch(error => {
+          console.warn('Measurement snapping could not be enabled', error);
+        });
+      });
+      expand.watch('expanded', expanded => {
+        if (!expanded && isLiveMeasurementActive(view)) clearMeasurement();
+      });
+      updateButtons(measurement.activeTool);
+
+      view.ui.add(expand, {
+        position: options.position || 'top-right',
+        index: Number.isInteger(options.index) ? options.index : 1
+      });
+
+      // Measurement graphics are useful on the live map, but must never be
+      // carried into a generated report map image.
+      document.getElementById('btnPrintReport')?.addEventListener('click', clearForReport, true);
+      window.addEventListener('beforeprint', clearForReport);
+
+      return Object.freeze({ measurement, expand, clear: clearForReport });
+    })().catch(error => {
+      console.warn('Live measurement tool could not be loaded', error);
+      return null;
+    });
+
+    liveMeasurementTools.set(view, pending);
+    return pending;
+  }
+
   const firstCompletedSearchResult = event => {
     const groups = Array.isArray(event?.results) ? event.results : [];
     const lotPlanGroup = groups.find(group => /lot\s*\/?\s*plan/i.test(group?.source?.name || ''));
@@ -2718,8 +2942,7 @@
         floodAuthority,
         renderScale,
         planningLink,
-        daSearchUrl,
-        interactiveMapUrl
+        daSearchUrl
       }){
         const esc=htmlEsc;
         const scaleHTML=typeof renderScale==="function" ? renderScale : (shot=>shot?.scaleText ? `<div class="map-scale">${esc(shot.scaleText)}</div>` : "");
@@ -2730,31 +2953,6 @@
         const safeAddress=resolvedAddress || (lot && lot!=="--" ? `Lot ${lot}, ${council}` : "Property report");
         const displayAddress=resolvedAddress || "Address unavailable";
         const currentDaSearchUrl=daSearchUrl||buildDevelopmentApplicationSearchUrl({council,address:resolvedAddress,lot});
-        const currentPageUrl=typeof window!=="undefined" ? window.location?.href : null;
-        const cadastralLot=qscfData?.parcel?.lot;
-        const cadastralPlan=qscfData?.parcel?.plan;
-        const rawInteractiveMapUrl=interactiveMapUrl||buildInteractivePropertyMapUrl({
-          pageUrl:currentPageUrl,
-          lotPlan:lot,
-          lot:cadastralLot,
-          plan:cadastralPlan
-        });
-        const interactiveMapUrlForOverlay=(overlayTitle,layerTitles=[])=>{
-          if(!rawInteractiveMapUrl) return null;
-          try{
-            const url=new URL(rawInteractiveMapUrl,currentPageUrl||undefined);
-            url.searchParams.set("interactiveMap","1");
-            url.searchParams.set("mapOnly","1");
-            url.searchParams.set("overlay",overlayTitle||"property");
-            url.searchParams.delete("layer");
-            [...new Set((Array.isArray(layerTitles)?layerTitles:[]).map(value=>String(value||"").trim()).filter(Boolean))]
-              .slice(0,40)
-              .forEach(value=>url.searchParams.append("layer",value));
-            return url.href;
-          }catch{
-            return rawInteractiveMapUrl;
-          }
-        };
         const when=generatedAt.toLocaleString("en-AU",{day:"numeric",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",hour12:false});
         const logoBlack="./images/lot-companion-logo-black.png";
         const logoWhite="./images/lot-companion-logo-white.png";
@@ -2768,15 +2966,6 @@
         const scopedReportShots=(Array.isArray(shots)?shots:[])
           .filter(Boolean)
           .map(shot=>({...shot,mappingScope:propertyReportMappingScope(shot)}));
-        const reportOverlayLayers=[...new Set(scopedReportShots
-          .flatMap(shot=>Array.isArray(shot.overlayLayers)?shot.overlayLayers:[])
-          .map(value=>String(value||"").trim())
-          .filter(Boolean))];
-        const currentInteractiveMapUrl=interactiveMapUrlForOverlay(
-          reportOverlayLayers.length ? "Report overlays" : "property",
-          reportOverlayLayers
-        );
-        const includeInteractiveMapFrame=!!currentInteractiveMapUrl && !(typeof window!=="undefined" && window.__LOT_WISE_VA_AUTOMATION__===true);
         const localReportShots=scopedReportShots.filter(shot=>shot.mappingScope!=="state");
         const stateReportShots=scopedReportShots.filter(shot=>shot.mappingScope==="state");
         const reportShots=[...localReportShots,...stateReportShots];
@@ -2816,7 +3005,7 @@
           ".page-footer{position:absolute;left:0;right:0;bottom:0;height:10mm;padding:0 10mm;display:flex;align-items:center;justify-content:space-between;gap:8mm;background:#000;color:#fff;font-size:7.5px;font-weight:400}.page-footer span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.page-footer span:last-child{flex:0 0 auto}",
           ".page-content{min-height:0;display:flex;flex-direction:column}.page-title{margin:3.5mm 0 3mm;font-size:23px;line-height:1;font-weight:800;letter-spacing:-.25px}",
           ".property-meta{margin-bottom:3.5mm;font-size:10px}.badges{display:flex;align-items:center;gap:1.5mm;margin-bottom:2.5mm}.badge-pill{display:inline-flex;align-items:center;min-height:6mm;border:.35mm solid #767b82;border-radius:4mm;padding:.6mm 2.2mm;background:#fff;font-size:9px;white-space:nowrap}.property-kv{display:flex;flex-direction:column;gap:1.6mm}",
-          ".property-map{position:relative;min-height:0;flex:1;margin-top:3.5mm;border-radius:4mm;overflow:hidden;background:#e8eaed}.property-map-static{display:block;width:100%;height:100%;object-fit:cover;transition:opacity .2s ease}.property-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.88);font-size:7.5px;font-weight:500;color:#111}.interactive-map-frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#e8eaed;opacity:0;transition:opacity .2s ease}.interactive-map-loading{position:absolute;left:50%;top:50%;z-index:3;transform:translate(-50%,-50%);padding:2.2mm 3mm;border-radius:2mm;background:rgba(255,255,255,.94);box-shadow:0 1mm 4mm rgba(0,0,0,.18);font-size:9px;font-weight:800}.interactive-map-toolbar{position:absolute;z-index:4;top:2.5mm;right:2.5mm;display:none;align-items:center;gap:2mm;padding:1.4mm 1.8mm;border-radius:2mm;background:rgba(255,255,255,.94);box-shadow:0 1mm 4mm rgba(0,0,0,.18);font-size:7.5px}.interactive-map-toolbar a{padding:1mm 1.6mm;border-radius:2mm;background:#2054d4;color:#fff;font-weight:800;text-decoration:none}.property-map.interactive-ready .interactive-map-frame{opacity:1}.property-map.interactive-ready .property-map-static,.property-map.interactive-ready>.map-scale{opacity:0}.property-map.interactive-ready .interactive-map-loading{display:none}.property-map.interactive-ready .interactive-map-toolbar{display:flex}",
+          ".property-map{position:relative;min-height:0;flex:1;margin-top:3.5mm;border-radius:4mm;overflow:hidden;background:#e8eaed}.property-map-static{display:block;width:100%;height:100%;object-fit:cover}.property-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.88);font-size:7.5px;font-weight:500;color:#111}",
           ".summary-page .page-title{margin-top:6mm;margin-bottom:6mm}.summary-grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-flow:column;grid-template-rows:repeat(var(--summary-rows),14mm);align-content:start;gap:0 3mm;min-height:0;flex:1;padding-bottom:2mm}.summary-item{position:relative;display:flex;flex-direction:column;justify-content:center;min-width:0;padding:1.4mm 9mm 1.4mm 2mm;border:.3mm solid var(--line);border-bottom:0;text-decoration:none;background:#fff;overflow:hidden}.summary-item.column-end,.summary-item:last-child{border-bottom:.3mm solid var(--line)}.summary-title{font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.summary-count{font-size:8px;font-weight:500}.summary-note{font-size:8px;color:#4c5056;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.summary-chevron{position:absolute;right:3mm;top:50%;width:2.5mm;height:2.5mm;border-top:.55mm solid #111;border-right:.55mm solid #111;transform:translateY(-50%) rotate(45deg)}.summary-empty{padding:5mm;border:.3mm solid var(--line);font-size:11px}",
           ".overlay-page .page-title{margin-top:5mm;margin-bottom:4mm}.overlay-actions{display:flex;gap:2mm;margin-bottom:3mm}.action-link{display:inline-flex;align-items:center;min-height:6mm;padding:.8mm 2.4mm;border:.3mm solid #777;border-radius:4mm;text-decoration:none;font-size:8px;font-weight:700;background:#fff}.overlay-layout{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(55mm,.8fr);gap:4mm;min-height:0;flex:1}.overlay-map{position:relative;min-height:0;border-radius:4mm;overflow:hidden;background:#e8eaed}.overlay-map>img{display:block;width:100%;height:100%;object-fit:cover}.overlay-map .map-scale{position:absolute;right:3mm;bottom:2.5mm;margin:0;padding:1mm 1.6mm;border-radius:1mm;background:rgba(255,255,255,.9);font-size:7.5px;color:#111}.report-panzoom{touch-action:none;cursor:grab;outline:none}.report-panzoom.is-dragging{cursor:grabbing}.report-panzoom:focus-visible{box-shadow:0 0 0 .8mm rgba(32,84,212,.55)}.report-panzoom-image{transform-origin:0 0;will-change:transform;user-select:none;-webkit-user-drag:none}.panzoom-hint{position:absolute;z-index:3;left:2.5mm;top:2.5mm;padding:1.2mm 1.7mm;border-radius:2mm;background:rgba(255,255,255,.92);box-shadow:0 .7mm 2.5mm rgba(0,0,0,.15);font-size:7px;font-weight:700;pointer-events:none}.panzoom-controls{position:absolute;z-index:4;right:2.5mm;top:2.5mm;display:flex;align-items:center;gap:.8mm;padding:1mm;border-radius:2mm;background:rgba(255,255,255,.94);box-shadow:0 .7mm 2.5mm rgba(0,0,0,.18)}.panzoom-controls button{width:7mm;height:7mm;padding:0;border:.3mm solid #8d9299;border-radius:1.5mm;background:#fff;color:#111;font:800 13px/1 'Hanken Grotesk',Arial,sans-serif;cursor:pointer}.panzoom-controls button:hover,.panzoom-controls button:focus-visible{border-color:#2054d4;background:#eef3ff}.panzoom-controls .panzoom-reset{width:auto;min-width:12mm;padding:0 1.6mm;font-size:7px}.panzoom-level{min-width:10mm;text-align:center;font-size:7px;font-weight:800}",
           ".legend-panel{min-height:0;padding:3mm;border:.3mm solid var(--line);border-radius:3mm;overflow-x:hidden;overflow-y:auto;scrollbar-gutter:stable;font-size:9px}.legend-heading{position:sticky;top:-3mm;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:3mm;margin:-3mm -3mm 2mm;padding:2.2mm 3mm;background:#fff;border-bottom:.3mm solid var(--line);font-size:9px}.legend-heading span{color:var(--muted);font-size:7px;font-weight:500}.legend-panel .leg{font-size:8px;line-height:1.3}.legend-panel .row{display:flex;align-items:center;gap:2mm;margin:1.5mm 0}.legend-panel .swbox{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;width:5mm;height:4.5mm;padding:.3mm;border:.3mm solid #9aa0a6;border-radius:.8mm;overflow:hidden;background:#fff}.legend-panel .swbox img,.legend-panel .swbox svg,.legend-panel .swbox canvas{width:100%;height:100%;display:block;object-fit:contain}.dense-legend .leg{font-size:7.2px;line-height:1.2}.dense-legend .row{margin:.9mm 0}.note{display:block;margin:0 0 3mm;padding:2.5mm;border-radius:2mm;background:#f1f2f4;font-size:9px;font-weight:700}",
@@ -2826,7 +3015,7 @@
           ".report-export-bar{position:fixed;z-index:10000;right:16px;bottom:16px}.report-export-button{min-width:170px;min-height:52px;padding:13px 20px;border:2px solid #fff;border-radius:12px;background:#2054d4;color:#fff;box-shadow:0 10px 32px rgba(0,0,0,.3),0 0 0 3px rgba(32,84,212,.28);font:800 14px/1.15 'Hanken Grotesk',Arial,sans-serif;letter-spacing:.1px;cursor:pointer;transition:transform .15s ease,background .15s ease,box-shadow .15s ease}.report-export-button:hover{transform:translateY(-2px);background:#1746bd;box-shadow:0 14px 36px rgba(0,0,0,.34),0 0 0 4px rgba(32,84,212,.32)}.report-export-button:focus-visible{outline:none;box-shadow:0 10px 32px rgba(0,0,0,.3),0 0 0 5px rgba(32,84,212,.4)}.pdf-map-hint{display:none}",
           "@media screen and (max-width:1150px){body{padding:0}.report-page{width:100vw;height:70.707vw;margin:0 auto 12px}}",
           "@media screen and (max-width:720px){.report-export-bar{right:8px;bottom:8px}}",
-          "@media print{html,body{background:#fff}body{padding:0}.report-page{margin:0;box-shadow:none}.report-export-bar,.interactive-map-frame,.interactive-map-loading,.interactive-map-toolbar,.panzoom-controls,.panzoom-hint{display:none!important}.pdf-map-hint{position:absolute;z-index:4;left:2.5mm;top:2.5mm;display:block;padding:1.2mm 1.7mm;border-radius:2mm;background:rgba(255,255,255,.92);font-size:7px;font-weight:700}.property-map-static{display:block!important;opacity:1!important;transition:none!important}.property-map>.map-scale{opacity:1!important;transition:none!important}.report-panzoom-image{transform:none!important}.legend-panel,.detail-panel{overflow:hidden;scrollbar-gutter:auto}.legend-heading{position:static}.legend-heading span{display:none}.dense-legend{padding:2mm}.dense-legend .legend-heading{margin:-2mm -2mm 1mm;padding:1.5mm 2mm}.dense-legend .leg{font-size:6.2px;line-height:1.08}.dense-legend .row{gap:1mm;margin:.35mm 0}.dense-legend .swbox{width:4mm;height:3.5mm}.detail-panel{font-size:7px;padding:2mm}.detail-panel th,.detail-panel td{padding:1mm}.setback-page .detail-panel{padding:0}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}",
+          "@media print{html,body{background:#fff}body{padding:0}.report-page{margin:0;box-shadow:none}.report-export-bar,.panzoom-controls,.panzoom-hint{display:none!important}.pdf-map-hint{position:absolute;z-index:4;left:2.5mm;top:2.5mm;display:block;padding:1.2mm 1.7mm;border-radius:2mm;background:rgba(255,255,255,.92);font-size:7px;font-weight:700}.property-map-static{display:block!important}.report-panzoom-image{transform:none!important}.legend-panel,.detail-panel{overflow:hidden;scrollbar-gutter:auto}.legend-heading{position:static}.legend-heading span{display:none}.dense-legend{padding:2mm}.dense-legend .legend-heading{margin:-2mm -2mm 1mm;padding:1.5mm 2mm}.dense-legend .leg{font-size:6.2px;line-height:1.08}.dense-legend .row{gap:1mm;margin:.35mm 0}.dense-legend .swbox{width:4mm;height:3.5mm}.detail-panel{font-size:7px;padding:2mm}.detail-panel th,.detail-panel td{padding:1mm}.setback-page .detail-panel{padding:0}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}",
           "</style></head><body>"
         );
         out.push(
@@ -2851,9 +3040,7 @@
                 "<span class='badge-pill'><strong>Area:&nbsp;</strong>",esc(reportArea),"</span>",
                   "<span class='badge-pill'><strong>Class:&nbsp;</strong>",esc(propertyClass),"</span>",
               "</div><div class='property-kv'><span><strong>Address:</strong>&nbsp; ",esc(displayAddress),"</span><span><strong>Council:</strong>&nbsp; ",esc(council),"</span></div></div>",
-              "<div class='property-map' id='interactivePropertyMapShell'><img class='property-map-static' src='",baseShot.dataUrl,"' alt='Aerial map of ",esc(safeAddress),"'>",scaleHTML(baseShot),
-                includeInteractiveMapFrame?"<iframe class='interactive-map-frame' id='interactivePropertyMapFrame' title='Interactive map of "+esc(safeAddress)+"' src='"+esc(currentInteractiveMapUrl)+"'></iframe><div class='interactive-map-loading' id='interactivePropertyMapStatus'>Loading interactive map...</div><div class='interactive-map-toolbar'><span>Scroll, pinch or use +/- to zoom</span><a target='_blank' rel='noopener' href='"+esc(currentInteractiveMapUrl)+"'>Open full map</a></div>":"",
-              "</div>",
+              "<div class='property-map report-panzoom' id='propertyMapImage' tabindex='0' role='region' aria-label='Zoomable aerial map of ",esc(safeAddress),"'><img class='property-map-static report-panzoom-image' draggable='false' src='",baseShot.dataUrl,"' alt='Aerial map of ",esc(safeAddress),"'>",scaleHTML(baseShot),"<div class='panzoom-hint'>Drag to move &middot; Scroll or pinch to zoom</div><div class='pdf-map-hint'>Use the PDF viewer's zoom and hand tool to inspect this map</div><div class='panzoom-controls' aria-label='Aerial image zoom controls'><button type='button' data-panzoom-action='out' aria-label='Zoom out'>&minus;</button><span class='panzoom-level' aria-live='polite'>100%</span><button type='button' data-panzoom-action='in' aria-label='Zoom in'>+</button><button type='button' class='panzoom-reset' data-panzoom-action='reset'>Reset</button></div></div>",
             "</main>",pageFooter(),
           "</section>"
         );
@@ -3085,74 +3272,6 @@
             if(printButton) printButton.addEventListener("click",()=>window.print());
           })();
         <\/script>`);
-        if(includeInteractiveMapFrame){
-          out.push(`<script>
-            (()=>{
-              const shell=document.getElementById("interactivePropertyMapShell");
-              const frame=document.getElementById("interactivePropertyMapFrame");
-              const status=document.getElementById("interactivePropertyMapStatus");
-              if(!shell || !frame) return;
-              if(window.location.protocol==="file:"){
-                frame.remove();
-                status?.remove();
-                return;
-              }
-              let finished=false;
-              let attempts=0;
-              const stopWithFallback=()=>{
-                if(finished) return;
-                finished=true;
-                if(status) status.textContent="Interactive preview unavailable - use Open interactive map";
-              };
-              const isolateMap=()=>{
-                if(finished) return;
-                attempts+=1;
-                try{
-                  const childWindow=frame.contentWindow;
-                  const childDocument=frame.contentDocument;
-                  const viewDiv=childDocument?.getElementById("viewDiv");
-                  const accessGate=childDocument?.getElementById("accessGate");
-                  const accessBlocked=accessGate && accessGate.classList.contains("active") && accessGate.getAttribute("aria-hidden")!=="true";
-                  const viewReady=viewDiv?.querySelector(".esri-view-root");
-                  if(!childWindow || !childDocument || !viewDiv || !viewReady || accessBlocked){
-                    if(attempts<600) childWindow?.setTimeout(isolateMap,200);
-                    else stopWithFallback();
-                    return;
-                  }
-                  let current=viewDiv;
-                  while(current && current!==childDocument.body){
-                    const parent=current.parentElement;
-                    if(!parent) break;
-                    for(const sibling of parent.children){
-                      if(sibling!==current) sibling.style.setProperty("display","none","important");
-                    }
-                    current.style.setProperty("position","fixed","important");
-                    current.style.setProperty("inset","0","important");
-                    current.style.setProperty("width","100%","important");
-                    current.style.setProperty("height","100%","important");
-                    current.style.setProperty("min-width","0","important");
-                    current.style.setProperty("min-height","0","important");
-                    current.style.setProperty("margin","0","important");
-                    current.style.setProperty("padding","0","important");
-                    current.style.setProperty("overflow","hidden","important");
-                    current=parent;
-                  }
-                  childDocument.documentElement.style.cssText="width:100%;height:100%;margin:0;overflow:hidden";
-                  childDocument.body.style.cssText="width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#e8eaed";
-                  finished=true;
-                  shell.classList.add("interactive-ready");
-                  childWindow.dispatchEvent(new Event("resize"));
-                  childWindow.setTimeout(()=>childWindow.dispatchEvent(new Event("resize")),250);
-                }catch{
-                  if(attempts<600) setTimeout(isolateMap,200);
-                  else stopWithFallback();
-                }
-              };
-              frame.addEventListener("load",isolateMap,{once:true});
-              setTimeout(isolateMap,100);
-            })();
-          <\/script>`);
-        }
         out.push("</body></html>");
         return out.join("");
       }
@@ -3909,6 +4028,7 @@
       }).catch(()=>{});
   view.ui.add(new Home({view}),"top-left");
       view.ui.add(new ScaleBar({view,unit:"metric"}),"bottom-left");
+      installLiveMeasurementTool(view,{arcgisVersion:"4.30"});
       const layerList=new LayerList({view,listItemCreatedFunction(e){
         const item=e.item, node=item.sublayer||item.layer;
         if(!node) return;
@@ -4435,6 +4555,7 @@
         } finally { showLoading(false); }
       }
       view.on("click", async ev=>{
+        if(isLiveMeasurementActive(view)) return;
         if(await showUtilityInfoPopup(view,ev,{enabled:utilitiesToggleState,utilityNodes:getUtilityNodes})) return;
         await selectParcelAtPoint(ev.mapPoint);
       });

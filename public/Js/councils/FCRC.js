@@ -14,6 +14,8 @@ import {
   getReportMapScale,
   getQueryParam,
   htmlEsc,
+  installLiveMeasurementTool,
+  isLiveMeasurementActive,
   ensureQueenslandStateBushfireLayer,
   isQueenslandStateBushfireLayer,
   scheduleQueenslandStateBushfireLayer,
@@ -45,7 +47,7 @@ import {
   prepareNativeParcelReferences,
   wireSearchResultSelection,
   withSatelliteBasemap
-} from "../council-hub.js?v=20261103-state-heritage";
+} from "../council-hub.js?v=20261113-live-measurement";
     /* ---------------- ArcGIS imports ---------------- */
     import Portal from "https://js.arcgis.com/4.30/@arcgis/core/portal/Portal.js";
     import WebMap from "https://js.arcgis.com/4.30/@arcgis/core/WebMap.js";
@@ -501,6 +503,7 @@ import Search from "https://js.arcgis.com/4.30/@arcgis/core/widgets/Search.js";
 
     view.ui.add(new Home({view}),"top-left");
     view.ui.add(new ScaleBar({view,unit:"metric"}),"bottom-left");
+    installLiveMeasurementTool(view,{arcgisVersion:"4.30"});
     const layerList=new LayerList({view,listItemCreatedFunction(event){
       const item=event.item;
       const node=item.sublayer||item.layer;
@@ -988,6 +991,7 @@ async function updateSideOverlaySummary(geom){
       } finally { showLoading(false); }
     }
     view.on("click", async ev=>{
+      if(isLiveMeasurementActive(view)) return;
       if(await showUtilityInfoPopup(view,ev,{enabled:utilitiesToggleState,utilityNodes:getUtilityNodes})) return;
       await selectParcelAtPoint(ev.mapPoint);
     });

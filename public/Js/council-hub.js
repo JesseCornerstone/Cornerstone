@@ -13,6 +13,230 @@ export const showLoading = on => {
   if (mask) mask.style.display = on ? 'flex' : 'none';
 };
 
+const liveMeasurementTools = new WeakMap();
+const liveMeasurementStates = new WeakMap();
+
+export const isLiveMeasurementActive = view => {
+  const measurement = liveMeasurementStates.get(view)?.measurement;
+  return measurement?.activeTool === 'distance' || measurement?.activeTool === 'area';
+};
+
+export const getLiveMeasurementSnappingStatus = view => {
+  const state = liveMeasurementStates.get(view);
+  const snapping = state?.measurement?.activeWidget?.snappingOptions;
+  return {
+    supported: state?.snapping?.supported === true,
+    configured: state?.snapping?.configured === true,
+    enabled: snapping?.enabled === true,
+    featureEnabled: snapping?.featureEnabled === true,
+    sourceCount: Number(snapping?.featureSources?.length || 0)
+  };
+};
+
+const isFullLiveMap = (windowRef = typeof window !== 'undefined' ? window : null) => {
+  if (!windowRef || windowRef.__LOT_WISE_FILE_MODE__ || windowRef.__LOT_WISE_VA_AUTOMATION__) {
+    return false;
+  }
+
+  try {
+    const url = new URL(windowRef.location.href);
+    return !/\/__va-report-ui(?:\/|$)/i.test(url.pathname)
+      && url.searchParams.get('mapOnly') !== '1';
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Add ArcGIS' scale-aware distance and area measurement widget to a full,
+ * interactive map. File-mode pages, report automation, and the map embedded
+ * inside a report deliberately skip this control.
+ */
+export async function installLiveMeasurementTool(view, options = {}) {
+  if (!view?.ui || !isFullLiveMap()) return null;
+  if (liveMeasurementTools.has(view)) return liveMeasurementTools.get(view);
+
+  const pending = (async () => {
+    const arcgisVersion = /^\d+\.\d+$/.test(String(options.arcgisVersion || ''))
+      ? String(options.arcgisVersion)
+      : '4.30';
+    const [measurementModule, expandModule] = await Promise.all([
+      import(`https://js.arcgis.com/${arcgisVersion}/@arcgis/core/widgets/Measurement.js`),
+      import(`https://js.arcgis.com/${arcgisVersion}/@arcgis/core/widgets/Expand.js`)
+    ]);
+
+    if (!isFullLiveMap() || view.destroyed) return null;
+
+    const Measurement = measurementModule.default;
+    const Expand = expandModule.default;
+    const panel = document.createElement('div');
+    panel.className = 'esri-widget lot-wise-measurement-panel';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-label', 'Map measurement tools');
+
+    const header = document.createElement('div');
+    header.className = 'lot-wise-measurement__header';
+    const titleRow = document.createElement('div');
+    titleRow.className = 'lot-wise-measurement__title-row';
+    const heading = document.createElement('strong');
+    heading.className = 'lot-wise-measurement__heading';
+    heading.textContent = 'Measure';
+    const modeStatus = document.createElement('span');
+    modeStatus.className = 'lot-wise-measurement__status';
+    modeStatus.textContent = 'Ready';
+    titleRow.append(heading, modeStatus);
+    const hint = document.createElement('p');
+    hint.className = 'lot-wise-measurement__hint';
+    hint.textContent = 'Choose a tool, then click the map. Parcel selection pauses while measuring.';
+    header.append(titleRow, hint);
+
+    const controls = document.createElement('div');
+    controls.className = 'lot-wise-measurement__controls';
+    const distanceButton = document.createElement('button');
+    const areaButton = document.createElement('button');
+    const clearButton = document.createElement('button');
+    const configureButton = (button, label, title, modifier) => {
+      button.type = 'button';
+      button.className = `lot-wise-measurement__button ${modifier}`;
+      button.textContent = label;
+      button.title = title;
+    };
+    configureButton(distanceButton, 'Distance', 'Measure ground distance', 'lot-wise-measurement__button--tool');
+    configureButton(areaButton, 'Area', 'Measure ground area', 'lot-wise-measurement__button--tool');
+    configureButton(clearButton, 'Clear', 'Clear the current measurement', 'lot-wise-measurement__button--clear');
+    controls.append(distanceButton, areaButton, clearButton);
+
+    const measurementHost = document.createElement('div');
+    measurementHost.className = 'lot-wise-measurement__body';
+    const measurement = new Measurement({ view, activeTool: null, container: measurementHost });
+    panel.append(header, controls, measurementHost);
+    const expand = new Expand({
+      id: 'lot-wise-live-measurement',
+      view,
+      content: panel,
+      expanded: false,
+      expandIconClass: 'esri-icon-measure',
+      expandTooltip: 'Measure distance or area',
+      collapseTooltip: 'Close measuring tools',
+      group: 'top-right'
+    });
+    const snappingState = {
+      supported: false,
+      configured: false
+    };
+    liveMeasurementStates.set(view, { measurement, expand, snapping: snappingState });
+
+    const hasSnappingSource = typeof options.getSnappingLayers === 'function'
+      || options.snappingLayers != null;
+    const snappingLayersReady = hasSnappingSource
+      ? (async () => {
+          const requested = typeof options.getSnappingLayers === 'function'
+            ? await options.getSnappingLayers()
+            : await options.snappingLayers;
+          const candidates = Array.isArray(requested)
+            ? requested
+            : requested
+              ? [requested]
+              : [];
+          const seen = new Set();
+          const layers = candidates.filter(layer => {
+            if (!layer || seen.has(layer)) return false;
+            seen.add(layer);
+            return layer.type === 'feature' || layer.type === 'graphics';
+          });
+
+          await Promise.allSettled(layers.map(layer => layer.load?.()));
+          await Promise.allSettled(layers.map(layer => view.whenLayerView?.(layer)));
+          return layers;
+        })().catch(error => {
+          console.warn('Measurement snapping layers could not be prepared', error);
+          return [];
+        })
+      : Promise.resolve([]);
+
+    const configureSnapping = async activeWidget => {
+      if (!hasSnappingSource || !activeWidget || !('snappingOptions' in activeWidget)) return;
+      snappingState.supported = true;
+      const layers = await snappingLayersReady;
+      if (measurement.activeWidget !== activeWidget || !layers.length) return;
+
+      const distance = Number(options.snappingDistance);
+      activeWidget.snappingOptions = {
+        enabled: true,
+        selfEnabled: true,
+        featureEnabled: true,
+        ...(Number.isFinite(distance) && distance > 0 ? { distance } : {}),
+        featureSources: layers.map(layer => ({ layer, enabled: true }))
+      };
+      snappingState.configured = activeWidget.snappingOptions?.enabled === true
+        && Number(activeWidget.snappingOptions?.featureSources?.length || 0) > 0;
+      panel.dataset.snapping = snappingState.configured ? 'ready' : 'unavailable';
+      panel.dataset.snappingSourceCount = String(activeWidget.snappingOptions?.featureSources?.length || 0);
+    };
+
+    const configureMetricUnits = activeWidget => {
+      if (!activeWidget) return;
+      const unit = measurement.activeTool === 'area' ? 'square-meters' : 'meters';
+      try { activeWidget.unitOptions = [unit]; } catch {}
+      try { activeWidget.unit = unit; } catch {}
+    };
+
+    const clearMeasurement = () => {
+      try { measurement.clear(); } catch {}
+      try { measurement.activeTool = null; } catch {}
+    };
+    const clearForReport = () => {
+      clearMeasurement();
+      try { expand.expanded = false; } catch {}
+    };
+
+    const selectTool = tool => {
+      try { measurement.clear(); } catch {}
+      measurement.activeTool = tool;
+    };
+    const updateButtons = activeTool => {
+      const active = activeTool === 'distance' || activeTool === 'area';
+      distanceButton.setAttribute('aria-pressed', String(activeTool === 'distance'));
+      areaButton.setAttribute('aria-pressed', String(activeTool === 'area'));
+      clearButton.disabled = !active;
+      panel.classList.toggle('is-active', active);
+      modeStatus.textContent = active ? 'Measuring' : 'Ready';
+    };
+    distanceButton.addEventListener('click', () => selectTool('distance'));
+    areaButton.addEventListener('click', () => selectTool('area'));
+    clearButton.addEventListener('click', clearMeasurement);
+    measurement.watch('activeTool', updateButtons);
+    measurement.watch('activeWidget', activeWidget => {
+      configureMetricUnits(activeWidget);
+      configureSnapping(activeWidget).catch(error => {
+        console.warn('Measurement snapping could not be enabled', error);
+      });
+    });
+    expand.watch('expanded', expanded => {
+      if (!expanded && isLiveMeasurementActive(view)) clearMeasurement();
+    });
+    updateButtons(measurement.activeTool);
+
+    view.ui.add(expand, {
+      position: options.position || 'top-right',
+      index: Number.isInteger(options.index) ? options.index : 1
+    });
+
+    // Measurement graphics are useful on the live map, but must never be
+    // carried into a generated report map image.
+    document.getElementById('btnPrintReport')?.addEventListener('click', clearForReport, true);
+    window.addEventListener('beforeprint', clearForReport);
+
+    return Object.freeze({ measurement, expand, clear: clearForReport });
+  })().catch(error => {
+    console.warn('Live measurement tool could not be loaded', error);
+    return null;
+  });
+
+  liveMeasurementTools.set(view, pending);
+  return pending;
+}
+
 const firstCompletedSearchResult = event => {
   const groups = Array.isArray(event?.results) ? event.results : [];
   const lotPlanGroup = groups.find(group => /lot\s*\/?\s*plan/i.test(group?.source?.name || ''));

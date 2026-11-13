@@ -604,3 +604,241 @@ aside#left {
 .esri-ui-corner .esri-component {
   margin: 8px !important;
 }
+
+/* Compact, dark-theme-safe measurement tool. */
+.esri-widget.lot-wise-measurement-panel {
+  --calcite-color-brand: #1b8dd8;
+  --calcite-color-brand-hover: #30a2eb;
+  --calcite-color-background: #1d1f24;
+  --calcite-color-foreground-1: #25272d;
+  --calcite-color-foreground-2: #2c2f36;
+  --calcite-color-foreground-3: #343740;
+  --calcite-color-text-1: #f7f8fb;
+  --calcite-color-text-2: #c5c9d2;
+  --calcite-color-text-3: #9ca2ae;
+  --calcite-color-border-1: #4a4e58;
+  --calcite-color-border-2: #3d414a;
+  --calcite-color-border-3: #343840;
+  --calcite-ui-brand: #1b8dd8;
+  --calcite-ui-background: #1d1f24;
+  --calcite-ui-foreground-1: #25272d;
+  --calcite-ui-foreground-2: #2c2f36;
+  --calcite-ui-foreground-3: #343740;
+  --calcite-ui-text-1: #f7f8fb;
+  --calcite-ui-text-2: #c5c9d2;
+  --calcite-ui-text-3: #9ca2ae;
+  width: 280px;
+  max-width: calc(100vw - 64px);
+  padding: 0 !important;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid #424650 !important;
+  border-radius: 10px !important;
+  background: #1d1f24 !important;
+  color: #f7f8fb !important;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36) !important;
+  font-family: 'Hanken Grotesk', sans-serif !important;
+}
+
+.lot-wise-measurement__header {
+  padding: 14px 14px 9px;
+}
+
+.lot-wise-measurement__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.lot-wise-measurement__heading {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+}
+
+.lot-wise-measurement__status {
+  border: 1px solid #484c56;
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: #292c32;
+  color: #b7bcc6;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.lot-wise-measurement-panel.is-active .lot-wise-measurement__status {
+  border-color: rgba(48, 162, 235, 0.48);
+  background: rgba(27, 141, 216, 0.16);
+  color: #71c7ff;
+}
+
+.lot-wise-measurement__hint {
+  margin: 7px 0 0;
+  color: #b4b9c3;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.lot-wise-measurement__controls {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+
+.lot-wise-measurement__button {
+  min-width: 0;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid #4b505b;
+  border-radius: 6px;
+  background: #292c32;
+  color: #eef0f4;
+  font: 650 12px/1 'Hanken Grotesk', sans-serif;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.lot-wise-measurement__button:hover:not(:disabled) {
+  border-color: #6b717e;
+  background: #33363e;
+  color: #ffffff;
+}
+
+.lot-wise-measurement__button:focus-visible {
+  outline: 2px solid #48aff1;
+  outline-offset: 2px;
+}
+
+.lot-wise-measurement__button--tool[aria-pressed='true'] {
+  border-color: #30a2eb;
+  background: #147dbf;
+  color: #ffffff;
+}
+
+.lot-wise-measurement__button--clear {
+  color: #c7cbd3;
+}
+
+.lot-wise-measurement__button:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.lot-wise-measurement__body {
+  width: 100%;
+  min-width: 0;
+  border-top: 1px solid #363a43;
+  background: #202227;
+  color: #f7f8fb !important;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.lot-wise-measurement-panel:not(.is-active) .lot-wise-measurement__body {
+  display: none;
+}
+
+.lot-wise-measurement-panel .esri-measurement,
+.lot-wise-measurement-panel .esri-area-measurement-2d,
+.lot-wise-measurement-panel .esri-distance-measurement-2d,
+.lot-wise-measurement-panel .esri-measurement-widget-content,
+.lot-wise-measurement-panel .esri-unit-select {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: #f7f8fb !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content {
+  display: block !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  padding: 12px 14px 14px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+.lot-wise-measurement-panel .esri-unit-select {
+  display: none !important;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content__measurement {
+  display: grid !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px !important;
+  box-sizing: border-box !important;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content__measurement-item {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  min-width: 0;
+  min-height: 58px;
+  padding: 9px 11px 10px;
+  border: 1px solid #3b404a;
+  border-left: 3px solid #229be6;
+  border-radius: 7px;
+  background: #272a31;
+  box-sizing: border-box !important;
+  overflow: hidden;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content__measurement-item:only-child {
+  grid-column: 1 / -1;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content__measurement-item__title,
+.lot-wise-measurement-panel .esri-unit-select__label {
+  color: #aeb4bf !important;
+  font-size: 10px !important;
+  font-weight: 650 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0.055em !important;
+  text-transform: uppercase !important;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content__measurement-item__value {
+  color: #ffffff !important;
+  max-width: 100%;
+  font-size: 16px !important;
+  font-weight: 750 !important;
+  line-height: 1.2 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lot-wise-measurement-panel .esri-measurement-widget-content__actions,
+.lot-wise-measurement-panel .esri-area-measurement-2d__clear-button,
+.lot-wise-measurement-panel .esri-distance-measurement-2d__clear-button {
+  display: none !important;
+}
+
+@media (max-width: 520px) {
+  .esri-widget.lot-wise-measurement-panel {
+    width: min(272px, calc(100vw - 58px));
+  }
+
+  .lot-wise-measurement__header {
+    padding: 12px 12px 8px;
+  }
+
+  .lot-wise-measurement__controls {
+    padding: 0 12px 11px;
+  }
+}

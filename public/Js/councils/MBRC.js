@@ -14,6 +14,8 @@ import {
   getReportMapScale,
   getQueryParam,
   htmlEsc,
+  installLiveMeasurementTool,
+  isLiveMeasurementActive,
   QUEENSLAND_STATE_BUSHFIRE_LAYER_URL,
   ensureQueenslandStateBushfireLayer,
   isQueenslandStateBushfireLayer,
@@ -49,7 +51,7 @@ import {
   prepareNativeParcelReferences,
   wireSearchResultSelection,
   withSatelliteBasemap
-} from "../council-hub.js?v=20261103-state-heritage";
+} from "../council-hub.js?v=20261113-live-measurement";
     import Portal from "https://js.arcgis.com/4.34/@arcgis/core/portal/Portal.js";
     import WebMap from "https://js.arcgis.com/4.34/@arcgis/core/WebMap.js";
     import MapView from "https://js.arcgis.com/4.34/@arcgis/core/views/MapView.js";
@@ -1178,6 +1180,23 @@ import {
     const mapStartupReady = initialiseWebMap();
 view.ui.add(new Home({view}),"top-left");
     view.ui.add(new ScaleBar({view,unit:"metric"}),"bottom-left");
+    const getMeasurementParcelSnappingLayers = async ()=>{
+      try{ await mapStartupReady; }catch{}
+      const matches=[];
+      try{
+        walkAny(view.map,node=>{
+          if(matches.length || node?.type!=="feature") return;
+          const url=String(node.url||"");
+          if(/\/MBRC_Property_Boundaries\/FeatureServer(?:\/\d+)?\/?$/i.test(url)) matches.push(node);
+        });
+      }catch{}
+      return matches;
+    };
+    installLiveMeasurementTool(view,{
+      arcgisVersion:"4.34",
+      getSnappingLayers:getMeasurementParcelSnappingLayers,
+      snappingDistance:12
+    });
     const layerList=new LayerList({view,listItemCreatedFunction(e){
       const item=e.item, node=item.sublayer||item.layer;
       if(!node) return;
@@ -2628,6 +2647,7 @@ async function updateSideOverlaySummary(geom){
       } finally { showLoading(false); }
     }
     view.on("click", async ev=>{
+      if(isLiveMeasurementActive(view)) return;
       if(await showUtilityInfoPopup(view,ev,{enabled:utilitiesToggleState,utilityNodes:getUtilityNodes})) return;
       await selectParcelAtPoint(ev.mapPoint);
     });

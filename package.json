@@ -17,6 +17,7 @@
     "test:search-selection": "node scripts/test-search-selection.js",
     "test:council-base": "node scripts/test-council-base-functions.js",
     "test:state-heritage": "node scripts/test-state-heritage.js",
+    "test:measurement": "node scripts/test-live-measurement.js",
     "test:interactive-report": "node scripts/test-interactive-report-map.js",
     "local": "node mapping-app.js",
     "serve:local": "node local-static-server.js",
